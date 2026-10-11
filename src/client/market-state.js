@@ -307,6 +307,33 @@ export function mergeLatestFields(nextItems, prevItems) {
 }
 
 /**
+ * 零增量提交守卫（C3 附带红利，钢人报告 2026-10-10）：fetchPage 的响应内容与当前数据
+ * 结构等价（JSON 值语义递归比较，身份无关——服务端/normalize 每轮都是新容器）则调用方
+ * 跳过 setData——数据层维持的引用稳定性（mergeLatestFields 无可叠加项返回原引用）不再被
+ * 一次无条件 setData 蒸发；toggle 后 refreshViews 的四连响应常态由此免重复重渲。
+ * ZoneChips setGeom 同款纪律，纯函数 Node 可测。undefined 与缺席键视为等价（JSON 值语义）。
+ */
+export function marketResponseEquivalent(a, b) {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (!marketResponseEquivalent(a[i], b[i])) return false
+    }
+    return true
+  }
+  const ka = Object.keys(a).filter((k) => a[k] !== undefined)
+  const kb = Object.keys(b).filter((k) => b[k] !== undefined)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!Object.prototype.hasOwnProperty.call(b, k) || !marketResponseEquivalent(a[k], b[k])) return false
+  }
+  return true
+}
+
+/**
  * ZoneChips 视觉裁剪纯函数组（0.9.53，方案A「隐身全量测量」，评审 R1-Q1～Q7 / R2-N1～N3）。
  * 统一坐标系 = `.dshm-chips` 内容盒顶（组件给容器设 position:relative 使其成为 offsetParent，
  * chip.offsetTop 即相对内容盒，消除 sticky wrap padding-top:8px 的系统性偏移）。

@@ -6,6 +6,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import * as ms from '../src/client/market-state.js'
 const {
@@ -260,5 +261,55 @@ describe('mergeLatestFields（0.9.45 两段加载：会话内徽标不回退）'
     const nextItem = { id: 'a' }
     mergeLatestFields([nextItem], [full])
     assert.equal(nextItem.latestVersion, undefined)
+  })
+})
+
+describe('marketResponseEquivalent（C3 零增量提交守卫：JSON 值语义递归比较）', () => {
+  const eq = ms.marketResponseEquivalent
+  it('同引用 → true；null/非对象混比 → false', () => {
+    const x = { items: [] }
+    assert.equal(eq(x, x), true)
+    assert.equal(eq(null, x), false)
+    assert.equal(eq(x, null), false)
+    assert.equal(eq(null, null), true)
+    assert.equal(eq('a', 'a'), true)
+  })
+  it('等值不同身份（items 嵌套 + categoryCounts + community.errors）→ true', () => {
+    const a = {
+      items: [{ id: 'p1', name: 'n', outdated: false, screenshots: ['u1'] }],
+      total: 1,
+      categoryCounts: { tools: 1 },
+      community: { enabled: true, errors: ['e1'] },
+    }
+    const b = JSON.parse(JSON.stringify(a))
+    assert.equal(eq(a, b), true)
+  })
+  it('标量差（total）/ 元素字段差（outdated）/ 长度差 → false', () => {
+    const base = { items: [{ id: 'p1', outdated: false }], total: 1 }
+    assert.equal(eq(base, { ...base, total: 2 }), false)
+    assert.equal(eq(base, { items: [{ id: 'p1', outdated: true }], total: 1 }), false)
+    assert.equal(eq(base, { items: [{ id: 'p1' }, { id: 'p2' }], total: 2 }), false)
+  })
+  it('categoryCounts 值差 / 数组 vs 普通对象 → false', () => {
+    const a = { categoryCounts: { tools: 1 } }
+    assert.equal(eq(a, { categoryCounts: { tools: 2 } }), false)
+    assert.equal(eq({ items: [] }, { items: {} }), false)
+  })
+  it('undefined 与缺席键等价（JSON 值语义）', () => {
+    assert.equal(eq({ a: 1, b: undefined }, { a: 1 }), true)
+    assert.equal(eq({ a: 1 }, { a: 1, b: undefined }), true)
+  })
+})
+
+// ---------- C3 接线结构锚（main.jsx 源串；client-lightbox 同款惯例） ----------
+describe('C3 接线结构锚（收藏 cache-only + fetchPage 零增量守卫）', () => {
+  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+
+  it('lookupLive 走 cache-only：stale 只需成员布尔，latest 扇出产物全丢弃', () => {
+    assert.ok(src.includes('api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" })'), '收藏 stale 检查必须传 probeMode cache-only（fetchPage 同款先例）')
+  })
+  it('fetchPage 零增量守卫：内容等价不提交，loading 照常收口', () => {
+    assert.ok(src.includes('if (!marketResponseEquivalent(prevData, merged)) setData(merged);'), '守卫调用逐字锚')
+    assert.ok(src.includes('autoExpandDecision, marketResponseEquivalent } = require("./market-state.js")'), 'market-state require 行导入 marketResponseEquivalent')
   })
 })
