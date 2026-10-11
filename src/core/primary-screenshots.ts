@@ -1,6 +1,14 @@
 import { fetchTextLimited, type FetchOptions } from './httpx.js'
 
 const MANIFEST_HOST = 'raw.githubusercontent.com'
+/**
+ * 0.9.77 兜底腿（桌面机 raw 被墙实录）：raw.githubusercontent.com 直连在部分网络下
+ * TLS 握手即被 reset，而 registry 清单自身早有 default-raw → default-jsdelivr 降级链、
+ * 社区目录有 jsdelivr/npmmirror/unpkg 三路由——截图 manifest 是全市场唯一单源抓取点，
+ * 症状为「列表/README/安装全正常，唯独精选详情无截图」。此处补齐同款第二腿：
+ * jsDelivr 的 GitHub 镜像，仅当 raw 抓取层失败（含 404/超时/host guard 拒绝）时启用。
+ */
+const MIRROR_HOST = 'cdn.jsdelivr.net'
 const MANIFEST_FILE = 'screenshots.json'
 const MAX_MANIFEST_BYTES = 64 * 1024
 const MAX_SCREENSHOTS = 8
@@ -26,17 +34,36 @@ interface CacheEntry {
   expiresAt: number
 }
 
-function manifestUrl(github: string): string | null {
+/** owner/repo 校验与归一（GITHUB_REPO_RE 与 registry 同款）；非法输入返回 null（零抓取）。 */
+function repoSlug(github: string): string | null {
   const value = typeof github === 'string' ? github.trim() : ''
   if (!GITHUB_REPO_RE.test(value)) return null
   const slash = value.indexOf('/')
   const owner = value.slice(0, slash)
   const repo = value.slice(slash + 1)
   if (owner.length > OWNER_MAX || repo.length > REPO_MAX || repo === '.' || repo === '..') return null
-  return `https://${MANIFEST_HOST}/${owner}/${repo}/HEAD/${MANIFEST_FILE}`
+  return `${owner}/${repo}`
 }
 
-function screenshotUrl(manifest: string, rawPath: unknown): string | null {
+/**
+ * raw 规范形（/HEAD/ = 默认分支）。它同时是 parseManifest 的路径解析基址：无论哪条腿供数，
+ * 返回的图片 URL 一律落在 *.githubusercontent.com——恰好通过客户端 safeScreenshots 图床白名单
+ * （main.jsx 只放行 github.com / *.githubusercontent.com），镜像腿若原样回 jsdelivr URL 会被
+ * 客户端整体过滤、白修。
+ */
+function rawManifestUrl(slug: string): string {
+  return `https://${MANIFEST_HOST}/${slug}/HEAD/${MANIFEST_FILE}`
+}
+
+/**
+ * jsDelivr 镜像形（@HEAD 与 raw /HEAD/ 同义，默认分支，实测可用）。镜像存在 CDN 缓存滞后
+ * （registry default-jsdelivr 同款取舍，可用 purge.jsdelivr.net 手动清缓存），截图属低频变更元数据，可接受。
+ */
+function mirrorManifestUrl(slug: string): string {
+  return `https://${MIRROR_HOST}/gh/${slug}@HEAD/${MANIFEST_FILE}`
+}
+
+function screenshotUrl(baseUrl: string, rawPath: unknown): string | null {
   if (typeof rawPath !== 'string') return null
   const path = rawPath.trim()
   if (!path || CONTROL_RE.test(path)) return null
@@ -45,11 +72,11 @@ function screenshotUrl(manifest: string, rawPath: unknown): string | null {
   if (/[?#]/.test(path)) return null
   const segments = path.split('/')
   if (segments.some((part) => part === '' || part === '.' || part === '..')) return null
-  const base = new URL('.', manifest)
+  const base = new URL('.', baseUrl)
   return new URL(segments.map((part) => encodeURIComponent(part)).join('/'), base).toString()
 }
 
-function parseManifest(text: string, manifestUrl: string): string[] {
+function parseManifest(text: string, baseUrl: string): string[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -59,31 +86,53 @@ function parseManifest(text: string, manifestUrl: string): string[] {
   if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_SCREENSHOTS) return []
   const result: string[] = []
   for (const path of parsed) {
-    const url = screenshotUrl(manifestUrl, path)
+    const url = screenshotUrl(baseUrl, path)
     if (!url) return []
     result.push(url)
   }
   return result
 }
 
-function assertManifestHost(raw: string, isRedirectHop: boolean): void {
+function assertManifestHost(raw: string, isRedirectHop: boolean, allowedHost: string): void {
   let url: URL
   try {
     url = new URL(raw)
   } catch {
     throw new Error(isRedirectHop ? 'screenshot manifest redirect URL is invalid' : 'invalid screenshot manifest request URL')
   }
-  if (url.protocol !== 'https:' || url.hostname !== MANIFEST_HOST || url.username || url.password || url.port) {
+  if (url.protocol !== 'https:' || url.hostname !== allowedHost || url.username || url.password || url.port) {
     throw new Error(
       isRedirectHop
-        ? 'screenshot manifest redirects must remain on raw.githubusercontent.com'
-        : 'screenshot manifest request URL must be https://raw.githubusercontent.com',
+        ? `screenshot manifest redirects must remain on ${allowedHost}`
+        : `screenshot manifest request URL must be https://${allowedHost}`,
     )
   }
 }
 
+/** 单腿抓取：每腿独立逐跳 host guard（初始跳 + 重定向都不许离开本腿源），5s / 64KB 上限逐腿独立生效。 */
+async function fetchManifestLeg(
+  fetchText: PrimaryScreenshotFetcher,
+  url: string,
+  allowedHost: string,
+): Promise<string> {
+  let hop = 0
+  return fetchText(url, {
+    timeoutMs: 5_000,
+    maxBytes: MAX_MANIFEST_BYTES,
+    headers: { accept: 'application/json' },
+    onRequest: (hopUrl) => {
+      // 逐跳 host guard；错误文案区分初始跳与重定向跳，避免调试误导（评审建议落盘）。
+      const isRedirectHop = hop > 0
+      hop += 1
+      assertManifestHost(hopUrl, isRedirectHop, allowedHost)
+    },
+  } satisfies FetchOptions)
+}
+
 /**
  * Read an author-owned root screenshots.json without consulting Community Catalog.
+ * 两腿链：raw 抓取层失败 → jsDelivr 镜像；两腿全败 → 空图库。解析层的「空」是权威结果
+ * （两腿读的是同一 repo 文件，镜像不会有不同内容），不再触发兜底。
  * All network access is bounded, and a rejected/empty manifest degrades to no gallery.
  */
 export function createPrimaryScreenshotReader(options: PrimaryScreenshotReaderOptions = {}): PrimaryScreenshotReader {
@@ -93,9 +142,10 @@ export function createPrimaryScreenshotReader(options: PrimaryScreenshotReaderOp
   const flights = new Map<string, Promise<string[]>>()
 
   return async (github: string): Promise<string[]> => {
-    const url = manifestUrl(github)
-    if (!url) return []
-    const key = url.toLowerCase()
+    const slug = repoSlug(github)
+    if (!slug) return []
+    const rawUrl = rawManifestUrl(slug)
+    const key = rawUrl.toLowerCase()
     const timestamp = now()
     for (const [cachedKey, value] of cache) {
       if (value.expiresAt <= timestamp) cache.delete(cachedKey)
@@ -108,23 +158,18 @@ export function createPrimaryScreenshotReader(options: PrimaryScreenshotReaderOp
 
     const flight = (async () => {
       let screenshots: string[] = []
-      let hop = 0
       try {
-        const text = await fetchText(url, {
-          timeoutMs: 5_000,
-          maxBytes: MAX_MANIFEST_BYTES,
-          headers: { accept: 'application/json' },
-          onRequest: (hopUrl) => {
-            // 逐跳 host guard；错误文案区分初始跳与重定向跳，避免调试误导（评审建议落盘）。
-            const isRedirectHop = hop > 0
-            hop += 1
-            assertManifestHost(hopUrl, isRedirectHop)
-          },
-        } satisfies FetchOptions)
-        screenshots = parseManifest(text, url)
+        const text = await fetchManifestLeg(fetchText, rawUrl, MANIFEST_HOST)
+        screenshots = parseManifest(text, rawUrl)
       } catch {
-        // Images are optional metadata: a missing/unavailable manifest must not block detail/install.
-        screenshots = []
+        try {
+          const mirrorUrl = mirrorManifestUrl(slug)
+          const text = await fetchManifestLeg(fetchText, mirrorUrl, MIRROR_HOST)
+          screenshots = parseManifest(text, rawUrl)
+        } catch {
+          // Images are optional metadata: a missing/unavailable manifest must not block detail/install.
+          screenshots = []
+        }
       }
       cache.set(key, {
         screenshots,

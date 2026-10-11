@@ -4,6 +4,7 @@ import { createPrimaryScreenshotReader } from '../lib/core/primary-screenshots.j
 
 const REPO = 'iasiv5/dsh-skins'
 const ROOT_MANIFEST = `https://raw.githubusercontent.com/${REPO}/HEAD/screenshots.json`
+const MIRROR_MANIFEST = `https://cdn.jsdelivr.net/gh/${REPO}@HEAD/screenshots.json`
 const FIVE_PATHS = [
   'docs/assets/preview-meirenzhi-1.webp',
   'docs/assets/preview-switcher.webp',
@@ -121,7 +122,7 @@ describe('Primary screenshots manifest reader', () => {
     }
   })
 
-  it('checks every outbound hop against the raw.githubusercontent.com host allowlist', async () => {
+  it('checks every outbound hop against the per-leg host allowlist (raw leg poisoned → mirror leg also poisoned → empty)', async () => {
     const calls = []
     const loader = createPrimaryScreenshotReader({
       fetchText: async (url, options = {}) => {
@@ -134,7 +135,7 @@ describe('Primary screenshots manifest reader', () => {
     })
 
     assert.deepEqual(await loader(REPO), [])
-    assert.deepEqual(calls, [ROOT_MANIFEST])
+    assert.deepEqual(calls, [ROOT_MANIFEST, MIRROR_MANIFEST])
   })
 
   it('distinguishes initial-URL and redirect-hop host-guard failure messages', async () => {
@@ -184,11 +185,11 @@ describe('Primary screenshots manifest reader', () => {
     assert.equal(calls.length, 2)
   })
 
-  it('404、timeout 与损坏 JSON 均返回空列表', async () => {
+  it('404 与 timeout 逐腿兜底（两腿各一次），损坏 JSON 是权威空结果（不打镜像）', async () => {
     const failures = [
-      { error: Object.assign(new Error('HTTP 404'), { status: 404 }) },
-      { error: Object.assign(new Error('timeout'), { name: 'TimeoutError' }) },
-      { body: '{broken json' },
+      { calls: 2, error: Object.assign(new Error('HTTP 404'), { status: 404 }) },
+      { calls: 2, error: Object.assign(new Error('timeout'), { name: 'TimeoutError' }) },
+      { calls: 1, body: '{broken json' },
     ]
     for (const failure of failures) {
       const calls = []
@@ -202,7 +203,7 @@ describe('Primary screenshots manifest reader', () => {
         now: () => 0,
       })
       assert.deepEqual(await loader(REPO), [])
-      assert.equal(calls.length, 1)
+      assert.equal(calls.length, failure.calls, `calls=${calls.length} failure=${JSON.stringify(failure)}`)
     }
   })
 
@@ -222,17 +223,76 @@ describe('Primary screenshots manifest reader', () => {
 
     assert.deepEqual(await loader(REPO), [])
     assert.deepEqual(await loader(REPO), [])
-    assert.equal(calls.length, 1, '失败结果在 1 分钟内负缓存')
+    assert.equal(calls.length, 2, '两腿全败结果在 1 分钟内负缓存（raw + mirror 各一次）')
 
     now = 60_001
     offline = false
     assert.deepEqual(await loader(REPO), [])
     assert.deepEqual(await loader(REPO), [])
-    assert.equal(calls.length, 2, '空数组结果也在 1 分钟内负缓存')
+    assert.equal(calls.length, 3, '空数组结果也在 1 分钟内负缓存（raw 成功即权威，不打镜像）')
 
     now = 120_002
     assert.deepEqual(await loader(REPO), [])
-    assert.equal(calls.length, 3, '负缓存过期后重新读取')
+    assert.equal(calls.length, 4, '负缓存过期后重新读取')
+  })
+
+  it('falls back to the jsDelivr mirror when raw is unreachable, rewriting image URLs to the raw canonical form', async () => {
+    const calls = []
+    const loader = createPrimaryScreenshotReader({
+      fetchText: async (url, options = {}) => {
+        calls.push(url)
+        options.onRequest?.(url)
+        if (url === ROOT_MANIFEST) throw Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+        return JSON.stringify(FIVE_PATHS)
+      },
+      now: () => 0,
+    })
+
+    // 图片 URL 恒为 raw 规范形：客户端 safeScreenshots 白名单只放行 github.com / *.githubusercontent.com，
+    // 镜像腿若原样回 jsdelivr URL 会被客户端整体过滤。
+    assert.deepEqual(await loader(REPO), FIVE_PATHS.map(rawUrl))
+    assert.deepEqual(calls, [ROOT_MANIFEST, MIRROR_MANIFEST])
+  })
+
+  it('both legs failing degrades to an empty gallery', async () => {
+    const calls = []
+    const loader = createPrimaryScreenshotReader({
+      fetchText: async (url, options = {}) => {
+        calls.push(url)
+        options.onRequest?.(url)
+        throw Object.assign(new Error('timeout'), { name: 'TimeoutError' })
+      },
+      now: () => 0,
+    })
+
+    assert.deepEqual(await loader(REPO), [])
+    assert.deepEqual(calls, [ROOT_MANIFEST, MIRROR_MANIFEST])
+  })
+
+  it('mirror redirects must remain on the jsDelivr host', async () => {
+    const calls = []
+    const messages = []
+    const loader = createPrimaryScreenshotReader({
+      fetchText: async (url, options = {}) => {
+        calls.push(url)
+        options.onRequest?.(url)
+        if (url === ROOT_MANIFEST) throw new Error('raw unreachable')
+        if (url === MIRROR_MANIFEST) {
+          try {
+            options.onRequest?.('https://evil.example/redirect-target')
+          } catch (err) {
+            messages.push(err.message)
+            throw err
+          }
+        }
+        return JSON.stringify(FIVE_PATHS)
+      },
+      now: () => 0,
+    })
+
+    assert.deepEqual(await loader(REPO), [])
+    assert.deepEqual(calls, [ROOT_MANIFEST, MIRROR_MANIFEST])
+    assert.deepEqual(messages, ['screenshot manifest redirects must remain on cdn.jsdelivr.net'])
   })
 
   it('coalesces concurrent reads for the same repo into one fetch', async () => {
