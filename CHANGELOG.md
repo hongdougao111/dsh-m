@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.78 性能：收藏 stale 检查零网络 + 市场页零增量提交守卫（钢人 C3）
+
+- **问题（钢人报告 C3 节）**：收藏 stale 判定只需要「id 还在不在目录」的成员布尔，却穿透富 market interface 的探测段——每次收藏区访问/切换（800ms debounce 合并后）仍是 N 条收藏 × full 查询，含每命中条 npm/github latest **网络扇出**且产物全部丢弃；叠加 toggle 后 refreshViews 四连响应无条件 `setData`——数据层精心维持的引用稳定性一次 setState 即蒸发。
+- **修复**：`lookupLive` 补 `probeMode:"cache-only"`（ADR-0013 第一段模式，零网络零探测；existence = items 成员判定，语义零变化）；`fetchPage` 增设**零增量提交守卫**——新增 `marketResponseEquivalent` 纯函数（JSON 值语义递归比较，ZoneChips setGeom 同款纪律），内容等价则跳过 `setData`（dataRef/loading 语义不动）。报告可选项「客户端 stale TTL 缓存」明确不做：C1 物化后 cache-only 查询已是内存级。
+- **验证**：1389 项测试全绿（执行基线 1382 + 新增 7）、typecheck 零错误；真机差分冒烟 5 组用例（npm 主清单/自身/社区条目/不存在 id）：cache-only 与 full 的 id 集合与 total 逐项一致（红点语义不变的充分条件），cache-only ~30ms vs full 冷跑 ~250ms（零探测指纹）；实施计划经独立评审两轮闭环（F1-1 计划基线勘误）。
+
 ### 0.9.76 修复：三项展示层退役与吸顶跳动根治——「对话」徽章/「版本无关」徽章退役 + 分类行滚动锚定自激断路
 
 - **① 「对话」来源徽章退役（主人实拍：界面全点按钮却全员误标「对话」）**：`meta.session` 是 0.7.0 终审·新伤1 的**泵所有权标记**（restore 跳过 / replaceAll 不回卷 / persist 时剥离），GUI 的 `runOp` 与对话区镜像两路无条件同打同一标——它区分不了来源，且重载后徽章整体蒸发。修复：opRowVm 删 session 派生、行渲染删徽章、CSS 与 i18n 键退役；`meta.session` 本职不动（数据模型零变更），来源区分留待未来 `meta.origin` 承载。
@@ -558,6 +564,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Performance in 0.9.78 — favorites stale checks go cache-only: zero-network favorites access + zero-increment commit guard (steelman C3)
+
+- **Problem (steelman report, card C3)**: the favorites stale verdict only needs a "is this id still in the catalog" membership boolean, yet it pierces the rich market interface's probe segment - every favorites visit/toggle (after the 800ms debounce merge) still fires N favorites × full queries including a per-hit npm/github latest **network fan-out** whose products are entirely discarded. On top of that, the unconditional `setData` after refreshViews' four-in-a-row responses (the post-toggle norm) evaporates the reference stability the data layer carefully maintains.
+- **Fix**: `lookupLive` now passes `probeMode:"cache-only"` (ADR-0013 first-phase mode: zero network, zero probing; existence = items membership, semantics unchanged); `fetchPage` gains a **zero-increment commit guard** - a new `marketResponseEquivalent` pure function (recursive JSON-value comparison, ZoneChips setGeom discipline) skips `setData` when content is equivalent (dataRef/loading semantics untouched). The report's optional "client-side stale TTL cache" is explicitly not done: after C1 materialization, cache-only queries are already memory-grade.
+- **Verification**: 1389 tests green (execution baseline 1382 + 7 added), typecheck clean; live-instance differential smoke across 5 cases (npm primary / self / community entry / nonexistent id): id sets and totals identical between cache-only and full (the sufficient condition for unchanged red-dot semantics), cache-only ~30ms vs cold full ~250ms (the zero-probe fingerprint); the implementation plan was closed over two independent review rounds (F1-1 plan-baseline correction).
 
 ### Fix in 0.9.76 — three presentation-layer retirements and sticky-chips jitter fixed at the root: "Chat" badge / "Version-independent" badge retired + scroll-anchoring self-excitation cut on the category row
 
