@@ -17,7 +17,7 @@
 - 收藏 stale 语义零变化：红点 =「已下架」成员判定布尔；800ms debounce 合并突变逻辑不动。
 - ADR-0013 两段加载语义不动：cache-only 首段 `latestComplete===false` 的第二段 full 追发仅存在于 `fetchPage`（页面路径）；收藏路径无第二段（不消费 latest 族字段）。
 - 快照写入时机不动（终态才写）。
-- 环境：bash + Node，命令在 `dsh-m/` 仓库根；基线 `npm test` = **1323 全绿**（2026-10-11 实测）+ typecheck exit 0。
+- 环境：bash + Node，命令在 `dsh-m/` 仓库根；执行基线 `npm test` = **1382 全绿**（0.9.77 = a6d0901 之后、C3 动工前实测；初稿误写 1323——系前夜 0.9.71–0.9.77 落地前的旧数，评审 F1-1 修正）+ typecheck exit 0。
 
 ## 文件结构与职责
 
@@ -45,12 +45,12 @@
 - 目标：收藏查询零网络；fetchPage 零增量不提交；结构锚防回归。
 - 涉及文件：Modify `src/client/main.jsx`；Test `tests/client-market-state.test.mjs`。
 - 接口契约：Consumes Task 1 的 `marketResponseEquivalent`；Produces 无（行为变更）。
-- 验证范围：`npm test` 全量 ≥ 1323 + 新增；`grep -c 'probeMode: "cache-only"' src/client/main.jsx` = 1（lookupLive）且 `grep -c 'probeMode = "cache-only"' src/client/main.jsx` = 1（fetchPage 缺省参，等号形式）。
+- 验证范围：`npm test` 全量 ≥ 1382 + 新增（终态 1389）；`grep -c 'probeMode: "cache-only"' src/client/main.jsx` = 1（lookupLive）且 `grep -c 'probeMode = "cache-only"' src/client/main.jsx` = 1（fetchPage 缺省参，等号形式）。
 
 - [ ] Step 1: 追加结构锚 describe（readFileSync main.jsx）：① `api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" })` 逐字锚；② `if (!marketResponseEquivalent(prevData, merged)) setData(merged);` 逐字锚；③ require 行含 `marketResponseEquivalent` 导入锚。
 - [ ] Step 2: Run → Expected：仅结构锚红。
 - [ ] Step 3: 三处接线：require 行追加 `marketResponseEquivalent`；`fetchPage` 捕获 `prevData` + 守卫替换裸 `setData(merged)`（`dataRef.current`/`setLoading` 语义不动）；`lookupLive` 的 api 参数补 `probeMode: "cache-only"` + 注释（C3：stale 只需成员布尔，latest 扇出产物全丢弃）。
-- [ ] Step 4: Run `npm test` → Expected：全量绿（≥1323+新增，0 fail）；probeMode 双形式 grep 各 =1（lookupLive 冒号形式 / fetchPage 缺省参等号形式）。
+- [ ] Step 4: Run `npm test` → Expected：全量绿（≥1382+新增，0 fail）；probeMode 双形式 grep 各 =1（lookupLive 冒号形式 / fetchPage 缺省参等号形式）。
 - [ ] Step 5: checkpoint commit（不 tag、不发版）。
 
 ## 执行纪律
@@ -59,7 +59,7 @@
 
 ## 最终验证
 
-- `npm run typecheck` exit 0；`npm test` 全绿且 ≥ 1323 + 本批新增；手工冒烟移交评审：收藏区切换/增删收藏——stale 红点语义不变、DevTools Network 面板零 `dshm/market` 探测型请求（cache-only 首段后无 full 追发）。
+- `npm run typecheck` exit 0；`npm test` 全绿且 ≥ 1382 + 本批新增（终态 1389 = 1382 + 7）；手工冒烟移交评审：收藏区切换/增删收藏——stale 红点语义不变、DevTools Network 面板零 `dshm/market` 探测型请求（cache-only 首段后无 full 追发）。
 
 ## 审阅 Checkpoint
 
