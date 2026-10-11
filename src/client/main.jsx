@@ -11,7 +11,7 @@ const PLUGIN_ID = "dsh-m";
 const API = "/dshm";
 
 // 市场面板 pure state（Node tests 直接覆盖；0.7.0 Task 8 分区化：zone 状态工厂/页码窗口/分区 chips；0.9.25 跨区搜索：searchSourceOf）
-const { DEFAULT_PAGE_SIZE, MARKET_PAGE_SIZES, pageItems, createZoneState, normalizeMarketQuery, resetPageOnFilterChange, normalizeMarketResponse, registryNotice, zoneChips, marketNotice, searchSourceOf, mergeLatestFields, chipRows, countBeyondRows, clipTopOf, visibleRowTop, autoExpandDecision } = require("./market-state.js");
+const { DEFAULT_PAGE_SIZE, MARKET_PAGE_SIZES, pageItems, createZoneState, normalizeMarketQuery, resetPageOnFilterChange, normalizeMarketResponse, registryNotice, zoneChips, marketNotice, searchSourceOf, mergeLatestFields, chipRows, countBeyondRows, clipTopOf, visibleRowTop, autoExpandDecision, marketResponseEquivalent } = require("./market-state.js");
 const { readMarketSnapshot, writeMarketSnapshot, isDefaultFirstPageQuery } = require("./market-snapshot.js");
 const { backdropCloseHandlers } = require("./backdrop.js");
 const { lbStep, lbNeighbors, swipeDir } = require("./lightbox.js");
@@ -772,11 +772,15 @@ function useMarketData(zone = "community") {
         if (genRef.current !== gen || ac.signal.aborted) return;
         const next = normalizeMarketResponse(raw);
         // 会话内徽标不回退：上一轮响应有 latest 族值而本响应缺 → 按 id 叠加（快照不含 latest 族字段）
-        const prevItems = dataRef.current && Array.isArray(dataRef.current.items) ? dataRef.current.items : null;
+        const prevData = dataRef.current;
+        const prevItems = prevData && Array.isArray(prevData.items) ? prevData.items : null;
         const mergedItems = mergeLatestFields(next.items, prevItems);
         const merged = mergedItems === next.items ? next : { ...next, items: mergedItems };
         dataRef.current = merged;
-        setData(merged);
+        // 零增量提交守卫（C3 附带红利）：内容等价则不提交——引用稳定性不再被无条件 setData 蒸发
+        // （toggle 后 refreshViews 四连响应常态；ZoneChips setGeom 同款纪律）。
+        // dataRef 照常更新（mergeLatestFields 的 prev 事实源），loading 照常收口，仅跳过 React 提交。
+        if (!marketResponseEquivalent(prevData, merged)) setData(merged);
         setLoading(false);
         // 第二段：仅 cache-only 首段有缺口时发起（'full' 恒为终态——防 latestTimedOut 死循环）；
         // force 由 params 传递 → core peek 旧值兜底 + 全页重探（P2）
@@ -2961,7 +2965,9 @@ function FavoriteZone({ favorites, onOpen }) {
         // stale 判定 = listMarket id 精确查询的结果集成员判定（Task 3 保证 id 整串精确命中）
         const lookupLive = async (fav) => {
           try {
-            const res = await api("market", { query: fav.id, source: "all", limit: 8 });
+            // C3（钢人报告）：stale 判定只要「id 还在不在」的成员布尔，probeMode cache-only
+            // 零网络零探测（ADR-0013 第一段模式）——full 的 latest 扇出产物本就全丢弃。
+            const res = await api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" });
             const items = res && Array.isArray(res.items) ? res.items : [];
             return items.some((x) => x && x.id === fav.id);
           } catch {

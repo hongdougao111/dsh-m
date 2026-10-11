@@ -45,12 +45,12 @@
 - 目标：收藏查询零网络；fetchPage 零增量不提交；结构锚防回归。
 - 涉及文件：Modify `src/client/main.jsx`；Test `tests/client-market-state.test.mjs`。
 - 接口契约：Consumes Task 1 的 `marketResponseEquivalent`；Produces 无（行为变更）。
-- 验证范围：`npm test` 全量 ≥ 1323 + 新增；`grep -c 'probeMode: "cache-only"' src/client/main.jsx` ≥ 2。
+- 验证范围：`npm test` 全量 ≥ 1323 + 新增；`grep -c 'probeMode: "cache-only"' src/client/main.jsx` = 1（lookupLive）且 `grep -c 'probeMode = "cache-only"' src/client/main.jsx` = 1（fetchPage 缺省参，等号形式）。
 
 - [ ] Step 1: 追加结构锚 describe（readFileSync main.jsx）：① `api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" })` 逐字锚；② `if (!marketResponseEquivalent(prevData, merged)) setData(merged);` 逐字锚；③ require 行含 `marketResponseEquivalent` 导入锚。
 - [ ] Step 2: Run → Expected：仅结构锚红。
 - [ ] Step 3: 三处接线：require 行追加 `marketResponseEquivalent`；`fetchPage` 捕获 `prevData` + 守卫替换裸 `setData(merged)`（`dataRef.current`/`setLoading` 语义不动）；`lookupLive` 的 api 参数补 `probeMode: "cache-only"` + 注释（C3：stale 只需成员布尔，latest 扇出产物全丢弃）。
-- [ ] Step 4: Run `npm test` → Expected：全量绿（≥1323+新增，0 fail）；grep ≥2。
+- [ ] Step 4: Run `npm test` → Expected：全量绿（≥1323+新增，0 fail）；probeMode 双形式 grep 各 =1（lookupLive 冒号形式 / fetchPage 缺省参等号形式）。
 - [ ] Step 5: checkpoint commit（不 tag、不发版）。
 
 ## 执行纪律
