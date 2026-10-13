@@ -24,6 +24,9 @@ import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
 // R1-1：L2 物化代跨用例隔离（fixture 假身份可能同键；node --test 文件内共享模块状态）
 beforeEach(() => _resetMergedMarketForTests())
 
+// 0.9.79：desktop 入口自记外部操作日志（'external' 兜底）——隔离 journal（同 cacheRoot 纪律）
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-journal-')), 'external-operations.json')
+
 const ENTRY = {
   id: 'plug-a',
   name: 'Plug A',

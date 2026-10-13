@@ -18,10 +18,13 @@ beforeEach(() => _resetMergedMarketForTests())
 
 // 0.9.14 Task 4b：latest 落盘接线后，listMarket/listInstalledWithMeta 会读写真实 cacheRoot——
 // 全文件统一隔离到临时目录（评审 R1-#4：本文件原先零 DSHM_CACHE_DIR，不补则触碰真实 ~/.dsh）。
+// 0.9.79：直调变更入口的用例会以 'external' 兜底通道落外部操作日志——同款纪律隔离 journal。
 const marketTestCacheRoot = mkdtempSync(join(tmpdir(), 'dshm-market-'))
 process.env.DSHM_CACHE_DIR = marketTestCacheRoot
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(marketTestCacheRoot, 'external-operations.json')
 after(() => {
   delete process.env.DSHM_CACHE_DIR
+  delete process.env.DSHM_EXTERNAL_JOURNAL_FILE
   rmSync(marketTestCacheRoot, { recursive: true, force: true })
 })
 

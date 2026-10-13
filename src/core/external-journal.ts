@@ -138,3 +138,45 @@ export async function clearExternalOperations(): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
   await atomicWrite(file, '[]\n')
 }
+
+/** appendExternalOperation 的类型（钩子注入位；R3-1：deps.appendExternalOperation ?? 真实现）。 */
+export type AppendExternalOperation = typeof appendExternalOperation
+
+/** 终态直落钩子的可注入依赖（测试用；生产缺省真实现）。 */
+export interface ExternalJournalHook {
+  appendExternalOperation?: AppendExternalOperation
+}
+
+/**
+ * 九个公共变更入口共用的终态直落钩子（0.9.79，ADR-0018）：
+ * - channel 缺省 'external'（审计上漏报更糟，未知调用方落兜底而非丢弃）；
+ * - channel='panel' 在钩子层**跳过**（面板通道零记录；append 侧的 panel 抛错仅为防御性不变量）；
+ * - append 任何失败被吞（至多 stderr 一行）——**绝不反噬操作终态与返回值**（R1-1）；
+ * - reason 截断 ≤300 字符（R1-8）。
+ * 调用时机 = 操作终态之后（成功与失败都记）。
+ */
+export async function journalExternalOperation(
+  channel: OperationChannel | undefined,
+  record: { kind: ExternalOperationKind; target: string; fromVersion?: string; toVersion?: string },
+  result: 'ok' | 'failed',
+  deps: ExternalJournalHook & { reason?: string } = {},
+): Promise<void> {
+  const ch: OperationChannel = channel ?? 'external'
+  if (ch === 'panel') return
+  try {
+    const reason = typeof deps.reason === 'string' ? deps.reason.slice(0, REASON_MAX) : undefined
+    await (deps.appendExternalOperation ?? appendExternalOperation)({
+      id: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: Date.now(),
+      channel: ch,
+      kind: record.kind,
+      target: record.target,
+      ...(record.fromVersion !== undefined ? { fromVersion: record.fromVersion } : {}),
+      ...(record.toVersion !== undefined ? { toVersion: record.toVersion } : {}),
+      result,
+      ...(reason !== undefined && reason !== '' ? { reason } : {}),
+    })
+  } catch (err) {
+    console.error(`[dsh-m] 外部操作记录落盘失败（不影响操作结果）: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}

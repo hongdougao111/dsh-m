@@ -349,6 +349,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               profile: profile.name,
               profileDir: profile.dir,
               signal,
+              channel: 'panel', // 0.9.79：面板自升级零外部记录（漏标 = 落 external，违反面板零记录不变量）
             }, { getService: d.getService, ensureService: d.ensureService })
             if ('needsBuildApproval' in managed) {
               // build-blocked（自升级罕见）：结构化透出，不冒充成功
@@ -365,7 +366,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             break
           }
           // M2 Task 3：self-upgrade 收编 market.selfUpgrade（统一 mutation session + 守卫，直调事务旁路封死）
-          const result = await d.selfUpgrade(ctx.pkg.name, ctx.pkg.version, cfg(), { signal })
+          const result = await d.selfUpgrade(ctx.pkg.name, ctx.pkg.version, cfg(), { signal, channel: 'panel' })
           payload = {
             pkg: result.pkg,
             version: result.version,
@@ -569,6 +570,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               profile: profile.name,
               profileDir: profile.dir,
               signal,
+              channel: 'panel',
             }, { getService: d.getService, ensureService: d.ensureService })) }
             break
           }
@@ -578,6 +580,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             forceIncompatible: boolArg(body.forceIncompatible),
             namespace: 'host',
             signal,
+            channel: 'panel',
           })
           payload = { ...result }
           break
@@ -589,10 +592,10 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           assertWriteAllowed(profile, 'uninstall')
           // 0.9.8：desktop → 官方管理器 removeBundle（dsh-market 同策略；此前结构化拒绝）
           if (profile.kind !== 'web') {
-            payload = { ...(await d.desktopUninstall(target, { getService: d.getService, ensureService: d.ensureService, profileDir: profile.dir })) }
+            payload = { ...(await d.desktopUninstall(target, { getService: d.getService, ensureService: d.ensureService, profileDir: profile.dir, channel: 'panel' })) }
             break
           }
-          const result = await d.uninstallPlugin(target, cfg(), { namespace: 'host', signal })
+          const result = await d.uninstallPlugin(target, cfg(), { namespace: 'host', signal, channel: 'panel' })
           payload = { ...result }
           break
         }
@@ -604,10 +607,10 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           // 0.9.0：desktop → 官方管理器委派（服务缺席结构化拒绝，禁 fallback 文件写）
           if (profile.kind !== 'web') {
             assertWriteAllowed(profile, 'set-enabled')
-            payload = { ...(await d.desktopToggle(target, body.enabled, { getService: d.getService as never, profileDir: profile.dir })) }
+            payload = { ...(await d.desktopToggle(target, body.enabled, { getService: d.getService as never, profileDir: profile.dir, channel: 'panel' })) }
             break
           }
-          const result = await d.toggle(target, body.enabled, { getService: d.getService })
+          const result = await d.toggle(target, body.enabled, { getService: d.getService, channel: 'panel' })
           payload = { ...result }
           break
         }
@@ -624,6 +627,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               profile: profile.name,
               profileDir: profile.dir,
               signal,
+              channel: 'panel',
             }, { getService: d.getService, ensureService: d.ensureService })) }
             break
           }
@@ -631,6 +635,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             forceIncompatible: boolArg(body.forceIncompatible),
             namespace: 'host',
             signal,
+            channel: 'panel',
           })
           payload = { ...result }
           break

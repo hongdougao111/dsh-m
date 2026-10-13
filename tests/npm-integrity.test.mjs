@@ -15,6 +15,9 @@ import { installFromRegistry } from '../lib/core/market.js'
 import { TransactionError } from '../lib/core/profile-transaction.js'
 import { _setWireFetchForTests } from '../lib/core/httpx.js'
 
+// 0.9.79：直调 installFromRegistry 会以 'external' 兜底落外部操作日志——隔离 journal
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-npmint-journal-')), 'external-operations.json')
+
 const sha512 = (tag) => `sha512-${tag}${'A'.repeat(20)}`
 
 // ADR-0012 T5：本文件全部用例把 wire 钉在 npmjs 权威源（stub URL 皆为 npmjs 形态）——

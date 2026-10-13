@@ -33,6 +33,7 @@ import { classifyUpgradeActivation, type ActivationClassification } from './acti
 import { togglePlugin, ToggleError, type PluginManagerRow } from './toggle.js'
 import { describeReleaseAgeFailure, releaseAgePrecheck, type ReleaseAgePrecheckDeps } from './release-age.js'
 import { governExcludeBlock, registerExclusion } from './exclude-governance.js'
+import { journalExternalOperation, type OperationChannel, type AppendExternalOperation } from './external-journal.js'
 import type { RegistryConfig, RegistryCacheNamespace } from './registry.js'
 
 /** desktop 升级社区兜底的等待上限（对齐 market.ts DEFAULT_DEADLINE_MS 量级；仅本路径使用）。 */
@@ -125,6 +126,8 @@ export interface DesktopInstallOptions {
   /** 目标 profile 目录（0.9.19 供应链等待期预检与账实分裂复读需要；缺席则两者跳过） */
   profileDir?: string
   signal?: AbortSignal
+  /** 调用通道（0.9.79 ADR-0018）：调用点显式传值；缺省 'external' */
+  channel?: OperationChannel
 }
 
 export interface DesktopInstallDeps {
@@ -146,6 +149,8 @@ export interface DesktopInstallDeps {
   registerExclude?: typeof registerExclusion
   /** 0.9.19 账实分裂复读（测试注入；缺省 installed.ts 实现） */
   listInstalled?: typeof defaultListInstalled
+  /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 export type DesktopInstallResult =
@@ -171,7 +176,31 @@ export async function desktopInstallFromRegistry(
   opts: DesktopInstallOptions = {},
   deps: DesktopInstallDeps = {},
 ): Promise<DesktopInstallResult> {
-  return withMutationSession(() => desktopInstallLocked(id, cfg, opts, deps))
+  // 0.9.79 外部操作直落（ADR-0018）：自记（call-graph audit：内部走 resolveEntry + service.installBundle，
+  // 不经 market.ts 已插桩入口）；成功/失败/needsBuildApproval（结构化未遂）都记；append 失败被钩子吞
+  try {
+    const result = await withMutationSession(() => desktopInstallLocked(id, cfg, opts, deps))
+    if ('needsBuildApproval' in result) {
+      await journalExternalOperation(opts.channel, { kind: 'desktop-install', target: id }, 'failed', {
+        reason: result.message,
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      return result
+    }
+    await journalExternalOperation(
+      opts.channel,
+      { kind: 'desktop-install', target: id, ...(result.version ? { toVersion: result.version } : {}) },
+      'ok',
+      { appendExternalOperation: deps.appendExternalOperation },
+    )
+    return result
+  } catch (err) {
+    await journalExternalOperation(opts.channel, { kind: 'desktop-install', target: id }, 'failed', {
+      reason: err instanceof Error ? err.message : String(err),
+      appendExternalOperation: deps.appendExternalOperation,
+    })
+    throw err
+  }
 }
 
 async function desktopInstallLocked(
@@ -300,18 +329,34 @@ export interface DesktopToggleDeps {
   getService?: () => DesktopManagerLike | undefined
   ensureService?: (timeoutMs?: number) => Promise<DesktopManagerLike | undefined>
   profileDir?: string
+  /** 调用通道（0.9.79 ADR-0018）：透传给 togglePlugin（唯一嵌套对）；缺省 'external' */
+  channel?: OperationChannel
+  /** 外部操作直落钩子注入（R3-1；透传 togglePlugin） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 /**
- * Desktop 开关：服务缺席 → 结构化拒绝（ToggleError/unaddressable，禁 fallback 文件写）；
- * 服务在用 → 既有 togglePlugin 委派路径（installed 校验按 profileDir，与 web 委派同代码）。
+ * Desktop 开关：服务缺席 → 结构化拒绝（ToggleError/unaddressable，禁 fallback 文件写；
+ * 该拒绝发生在透传前，由本入口自记 desktop-toggle failed——类型契约中该 kind 的唯一可达路径）；
+ * 服务在用 → 既有 togglePlugin 委派路径（installed 校验按 profileDir，与 web 委派同代码；
+ * channel/钩子透传，单笔事务只产生一条 toggle 记录，不双记——R1-2）。
  */
 export async function desktopToggle(pkg: string, enabled: boolean, deps: DesktopToggleDeps = {}): Promise<ReturnType<typeof togglePlugin>> {
   const service = await resolveManager(deps)
   if (!service) {
-    throw new ToggleError('unaddressable', '官方 pluginManager 服务不可用：desktop profile 的开关必须走官方管理器（dsh-m 不做文件级 fallback）；请在官方 Desktop 插件页操作')
+    const message = '官方 pluginManager 服务不可用：desktop profile 的开关必须走官方管理器（dsh-m 不做文件级 fallback）；请在官方 Desktop 插件页操作'
+    await journalExternalOperation(deps.channel, { kind: 'desktop-toggle', target: pkg }, 'failed', {
+      reason: message,
+      appendExternalOperation: deps.appendExternalOperation,
+    })
+    throw new ToggleError('unaddressable', message)
   }
-  return togglePlugin(pkg, enabled, { getService: () => service, profileDir: deps.profileDir })
+  return togglePlugin(pkg, enabled, {
+    getService: () => service,
+    profileDir: deps.profileDir,
+    channel: deps.channel,
+    appendExternalOperation: deps.appendExternalOperation,
+  })
 }
 
 /**
@@ -499,6 +544,10 @@ export interface DesktopUninstallDeps extends DesktopEnsureService {
   getService?: () => DesktopManagerLike | undefined
   /** 管理器按 bundle 名操作，目录当前用不上；保留与 install/toggle 对称（dsh-market 同注释） */
   profileDir?: string
+  /** 调用通道（0.9.79 ADR-0018）：缺省 'external' */
+  channel?: OperationChannel
+  /** 外部操作直落钩子注入（R3-1；缺省 = 真实现） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 export interface DesktopUninstallResult {
@@ -513,31 +562,43 @@ export interface DesktopUninstallResult {
 /**
  * Desktop 卸载（0.9.8，dsh-market 同策略）：removeBundle 委派 + ChangeResult 判定 +
  * listBundles 复读（可用时必须不见目标在装）。服务缺席 → 结构化拒绝，零 CLI、零文件级 fallback。
+ * 0.9.79：自记外部操作（call-graph audit：内部直接 service.removeBundle，不经 market.ts 插桩入口）。
  */
 export async function desktopUninstall(pkg: string, deps: DesktopUninstallDeps = {}): Promise<DesktopUninstallResult> {
-  const service = await resolveManager(deps)
-  if (!service || typeof service.removeBundle !== 'function') {
-    throw new DesktopOpsError('no-manager', '官方 pluginManager 服务不可用（desktop profile 的卸载必须由官方管理器执行）；拒绝卸载（fail-closed）')
-  }
-  const raw = await service.removeBundle(pkg)
-  const change = changeOf(raw)
-  if (change.application === 'failed' || change.error) {
-    throw new DesktopOpsError('remove-failed', `官方管理器卸载失败（${pkg}；application=${change.application ?? 'failed'}${change.error?.code ? `、error=${change.error.code}` : ''}${change.error?.diagnostic ? `：${change.error.diagnostic}` : ''}）`)
-  }
-  if (typeof service.listBundles === 'function') {
-    const bundles = await service.listBundles()
-    const found = (bundles ?? []).find((b) => b && b.name === (change.bundle ?? pkg))
-    if (found && found.installed === true) {
-      throw new DesktopOpsError('verify-failed', `卸载复读失败（${pkg}）：官方结果为 ${change.application ?? 'unknown'} 但 listBundles 仍见目标在装——不冒充卸载成功`)
+  try {
+    const service = await resolveManager(deps)
+    if (!service || typeof service.removeBundle !== 'function') {
+      throw new DesktopOpsError('no-manager', '官方 pluginManager 服务不可用（desktop profile 的卸载必须由官方管理器执行）；拒绝卸载（fail-closed）')
     }
-  }
-  return {
-    pkg,
-    liveDisabled: false,
-    needsRestart: change.application === 'restart-required',
-    leftovers: [],
-    via: 'desktop-manager',
-    output: `official pluginManager: application=${change.application ?? 'applied'}`,
+    const raw = await service.removeBundle(pkg)
+    const change = changeOf(raw)
+    if (change.application === 'failed' || change.error) {
+      throw new DesktopOpsError('remove-failed', `官方管理器卸载失败（${pkg}；application=${change.application ?? 'failed'}${change.error?.code ? `、error=${change.error.code}` : ''}${change.error?.diagnostic ? `：${change.error.diagnostic}` : ''}）`)
+    }
+    if (typeof service.listBundles === 'function') {
+      const bundles = await service.listBundles()
+      const found = (bundles ?? []).find((b) => b && b.name === (change.bundle ?? pkg))
+      if (found && found.installed === true) {
+        throw new DesktopOpsError('verify-failed', `卸载复读失败（${pkg}）：官方结果为 ${change.application ?? 'unknown'} 但 listBundles 仍见目标在装——不冒充卸载成功`)
+      }
+    }
+    await journalExternalOperation(deps.channel, { kind: 'desktop-uninstall', target: pkg }, 'ok', {
+      appendExternalOperation: deps.appendExternalOperation,
+    })
+    return {
+      pkg,
+      liveDisabled: false,
+      needsRestart: change.application === 'restart-required',
+      leftovers: [],
+      via: 'desktop-manager',
+      output: `official pluginManager: application=${change.application ?? 'applied'}`,
+    }
+  } catch (err) {
+    await journalExternalOperation(deps.channel, { kind: 'desktop-uninstall', target: pkg }, 'failed', {
+      reason: err instanceof Error ? err.message : String(err),
+      appendExternalOperation: deps.appendExternalOperation,
+    })
+    throw err
   }
 }
 
@@ -550,6 +611,8 @@ export interface DesktopUpgradeOptions {
   profile?: string
   profileDir?: string
   signal?: AbortSignal
+  /** 调用通道（0.9.79 ADR-0018）：调用点显式传值；缺省 'external' */
+  channel?: OperationChannel
 }
 
 export interface DesktopUpgradeDeps extends DesktopEnsureService {
@@ -568,12 +631,16 @@ export interface DesktopUpgradeDeps extends DesktopEnsureService {
   registerExclude?: typeof registerExclusion
   /** 生效判定注入（0.9.22 测试用；缺省 = classifyUpgradeActivation，npm 源升级成功点调用） */
   classifyActivation?: (pkg: string, fromVersion: string, toVersion: string) => Promise<ActivationClassification>
+  /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 /**
  * Desktop 升级（0.9.8，dsh-market 同策略——本机 0.9.3→0.9.4/0.9.5 即此路径实证）：
  * 覆盖安装 = installBundle(latest 精确 spec)。收录匹配（主清单 → 社区目录）与
  * upgradePluginLocked 同语义；非 dsh-m 收录的插件结构化拒绝（官方插件页负责）。
+ * 0.9.79：自记外部操作（call-graph audit：内部走 loadRegistry/mergedOutcome + service.installBundle，
+ * 不经 market.ts 已插桩入口）；needsBuildApproval（结构化未遂）记 failed。
  */
 export async function desktopUpgradeFromRegistry(
   pkg: string,
@@ -581,7 +648,34 @@ export async function desktopUpgradeFromRegistry(
   opts: DesktopUpgradeOptions = {},
   deps: DesktopUpgradeDeps = {},
 ): Promise<DesktopInstallResult & { fromVersion?: string; activation?: ActivationClassification }> {
-  return withMutationSession(() => desktopUpgradeLocked(pkg, cfg, opts, deps))
+  try {
+    const result = await withMutationSession(() => desktopUpgradeLocked(pkg, cfg, opts, deps))
+    if ('needsBuildApproval' in result) {
+      await journalExternalOperation(opts.channel, { kind: 'desktop-upgrade', target: pkg }, 'failed', {
+        reason: result.message,
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      return result
+    }
+    await journalExternalOperation(
+      opts.channel,
+      {
+        kind: 'desktop-upgrade',
+        target: pkg,
+        ...(result.fromVersion ? { fromVersion: result.fromVersion } : {}),
+        ...(result.version ? { toVersion: result.version } : {}),
+      },
+      'ok',
+      { appendExternalOperation: deps.appendExternalOperation },
+    )
+    return result
+  } catch (err) {
+    await journalExternalOperation(opts.channel, { kind: 'desktop-upgrade', target: pkg }, 'failed', {
+      reason: err instanceof Error ? err.message : String(err),
+      appendExternalOperation: deps.appendExternalOperation,
+    })
+    throw err
+  }
 }
 
 async function desktopUpgradeLocked(

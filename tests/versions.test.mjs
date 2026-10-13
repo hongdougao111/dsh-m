@@ -12,6 +12,9 @@ import { join } from 'node:path'
 
 import { listInstalledWithMeta, installFromRegistry } from '../lib/core/market.js'
 import { npmLatest, npmPackument, npmPackumentReadme, npmVersion } from '../lib/core/versions.js'
+
+// 0.9.79：直调 installFromRegistry 会以 'external' 兜底落外部操作日志——隔离 journal
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-versions-journal-')), 'external-operations.json')
 import {
   createGithubRequestBudget,
   githubLatestTag,

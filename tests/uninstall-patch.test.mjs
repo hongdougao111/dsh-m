@@ -12,6 +12,9 @@ import { join } from 'node:path'
 import { removePatchedDependencyEntries } from '../lib/core/dsh-cli.js'
 import { uninstallPlugin } from '../lib/core/market.js'
 
+// 0.9.79：直调 uninstallPlugin 会以 'external' 兜底落外部操作日志——隔离 journal（同 cacheRoot 纪律）
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-patch-journal-')), 'external-operations.json')
+
 function fixture(profileFiles) {
   const dir = mkdtempSync(join(tmpdir(), 'dshm-patch-'))
   for (const [name, content] of Object.entries(profileFiles)) {

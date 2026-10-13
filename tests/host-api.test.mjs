@@ -147,9 +147,12 @@ let cacheRoot = ''
 beforeEach(() => {
   cacheRoot = mkdtempSync(join(tmpdir(), 'dshm-api-'))
   process.env.DSHM_CACHE_DIR = cacheRoot
+  // 0.9.79：mutation 用例可能落真实实现的外部操作日志——隔离 journal，不触碰真实 ~/.dsh
+  process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(cacheRoot, 'external-operations.json')
 })
 afterEach(() => {
   delete process.env.DSHM_CACHE_DIR
+  delete process.env.DSHM_EXTERNAL_JOURNAL_FILE
   if (cacheRoot) rmSync(cacheRoot, { recursive: true, force: true })
 })
 

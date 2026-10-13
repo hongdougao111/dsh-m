@@ -19,6 +19,8 @@ import { TransactionError } from '../lib/core/profile-transaction.js'
 import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
 // R1-1：L2 物化代跨用例隔离（fixture 假身份可能同键；node --test 文件内共享模块状态）
 beforeEach(() => _resetMergedMarketForTests())
+// 0.9.79：直调 installFromRegistry 会以 'external' 兜底落外部操作日志——隔离 journal
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-rollback-journal-')), 'external-operations.json')
 import { CONFIG_MISMATCH_TEXT, NO_MATCHING_TEXT } from './fixtures/pnpm-errors.mjs'
 
 const sha512 = (tag) => `sha512-${tag}${'A'.repeat(20)}`

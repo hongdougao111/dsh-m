@@ -61,6 +61,7 @@ import { classifyUpgradeActivation, type ActivationClassification } from './acti
 import { HttpError } from './httpx.js'
 import { ensureLatestCacheSwept, invalidateLatestCache, latestCacheKey, latestItemId, peekLatestCache, readLatestCache, writeLatestCache, type LatestValue } from './latest-cache.js'
 import { verifyInstalledAdditions, type GuardViolation } from './install-guard.js'
+import { journalExternalOperation, type OperationChannel, type AppendExternalOperation } from './external-journal.js'
 import { readPnpmLockIntegrity } from './npm-integrity.js'
 import type { CompensateEvidence, PriorUnion, TransactionResult } from './profile-transaction.js'
 import { decodeUtf8Fatal, fetchTextLimited } from './httpx.js'
@@ -883,6 +884,8 @@ export interface InstallDeps extends Partial<MarketDeps> {
   transaction?: TransactionDeps
   /** 目标 profile 目录（0.9.0 双 profile；缺省 webProfileDir()；transaction.profileDir 优先） */
   profileDir?: string
+  /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现 appendExternalOperation） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 export interface InstallResult {
@@ -956,11 +959,29 @@ export async function resolveRegistryEntry(
 export async function installFromRegistry(
   id: string,
   cfg: RegistryConfig = {},
-  opts: { version?: string; forceIncompatible?: boolean } & RegistryRuntimeOptions = {},
+  opts: { version?: string; forceIncompatible?: boolean; channel?: OperationChannel } & RegistryRuntimeOptions = {},
   deps?: InstallDeps,
 ): Promise<InstallResult> {
-  const entry = await resolveRegistryEntry(id, cfg, opts, deps)
-  return installEntry(entry, cfg, opts, deps)
+  // 0.9.79 外部操作直落（ADR-0018）：终态后挂钩，成功与失败都记；append 失败被钩子吞（R1-1）
+  try {
+    const entry = await resolveRegistryEntry(id, cfg, opts, deps)
+    const result = await installEntry(entry, cfg, opts, deps)
+    await journalExternalOperation(
+      opts.channel,
+      { kind: 'install', target: id, ...(result.version ? { toVersion: result.version } : {}) },
+      'ok',
+      { appendExternalOperation: deps?.appendExternalOperation },
+    )
+    return result
+  } catch (err) {
+    await journalExternalOperation(
+      opts.channel,
+      { kind: 'install', target: id },
+      'failed',
+      { reason: errText(err), appendExternalOperation: deps?.appendExternalOperation },
+    )
+    throw err
+  }
 }
 
 /** 安装接口收窄（M1 Task 5）：社区条目（CommunityEntry）与主清单条目同型可装。 */
@@ -1550,16 +1571,33 @@ export interface UninstallResult {
 export interface UninstallDeps {
   /** Task 6 起：卸载走事务（validate 前置 + 快照 + 回滚）；注入仅为可测试性 */
   transaction?: TransactionDeps
+  /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 /** 卸载：validate（严格读取）→ live-disable → 摘补丁 → pnpm remove → verify gone（DESIGN.md §3：删包不删数据）。 */
 export function uninstallPlugin(
   pkg: string,
   cfg: RegistryConfig = {},
-  opts: RegistryRuntimeOptions = {},
+  opts: { channel?: OperationChannel } & RegistryRuntimeOptions = {},
   deps: UninstallDeps = {},
 ): Promise<UninstallResult> {
-  return withMutationSession(() => uninstallPluginLocked(pkg, cfg, opts, deps))
+  // 0.9.79 外部操作直落（ADR-0018）：终态后挂钩，session 区间内保持单写者
+  return withMutationSession(async () => {
+    try {
+      const result = await uninstallPluginLocked(pkg, cfg, opts, deps)
+      await journalExternalOperation(opts.channel, { kind: 'uninstall', target: pkg }, 'ok', {
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      return result
+    } catch (err) {
+      await journalExternalOperation(opts.channel, { kind: 'uninstall', target: pkg }, 'failed', {
+        reason: errText(err),
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      throw err
+    }
+  })
 }
 
 async function uninstallPluginLocked(
@@ -1603,10 +1641,33 @@ export interface UpgradeResult extends InstallResult {
 export function upgradePlugin(
   pkg: string,
   cfg: RegistryConfig = {},
-  opts: { forceIncompatible?: boolean; profileDir?: string } & RegistryRuntimeOptions = {},
+  opts: { forceIncompatible?: boolean; profileDir?: string; channel?: OperationChannel } & RegistryRuntimeOptions = {},
   deps?: InstallDeps,
 ): Promise<UpgradeResult> {
-  return withMutationSession(() => upgradePluginLocked(pkg, cfg, opts, deps))
+  // 0.9.79 外部操作直落（ADR-0018）：终态后挂钩，session 区间内保持单写者
+  return withMutationSession(async () => {
+    try {
+      const result = await upgradePluginLocked(pkg, cfg, opts, deps)
+      await journalExternalOperation(
+        opts.channel,
+        {
+          kind: 'upgrade',
+          target: pkg,
+          ...(result.fromVersion ? { fromVersion: result.fromVersion } : {}),
+          ...(result.version ? { toVersion: result.version } : {}),
+        },
+        'ok',
+        { appendExternalOperation: deps?.appendExternalOperation },
+      )
+      return result
+    } catch (err) {
+      await journalExternalOperation(opts.channel, { kind: 'upgrade', target: pkg }, 'failed', {
+        reason: errText(err),
+        appendExternalOperation: deps?.appendExternalOperation,
+      })
+      throw err
+    }
+  })
 }
 
 async function upgradePluginLocked(
@@ -1665,36 +1726,58 @@ async function upgradePluginLocked(
  * （owner--name 等），主清单 miss 时按同一 id 查社区目录。社区清单未启用/不可用/加载
  * 异常/未命中 → undefined，由调用方统一报「registry 中没有该条目」。
  */
-/** 自升级（0.5.0 收编：host-api 直调事务的旁路封死）：npmLatest + integrity fail-closed + installEntryLocked（session/守卫经 installEntry）。 */
+/** 自升级（0.5.0 收编：host-api 直调事务的旁路封死）：npmLatest + integrity fail-closed；函数体直调事务（call-graph audit：不经 installEntry，无嵌套双记）。 */
 export async function selfUpgrade(
   pkgName: string,
   currentVersion: string,
   cfg: RegistryConfig = {},
-  opts: RegistryRuntimeOptions = {},
+  opts: { channel?: OperationChannel } & RegistryRuntimeOptions = {},
   deps?: InstallDeps,
 ): Promise<InstallResult> {
   return withMutationSession(async () => {
-    const timeoutMs = cfg.timeoutMs ?? 20_000
-    const latest = await (deps?.npmLatest ?? defaultNpmLatest)(pkgName, timeoutMs, opts.signal)
-    if (!latest.integrity) {
-      throw new Error(`npm metadata 缺少 dist integrity：${pkgName}@${latest.version}，拒绝升级`)
-    }
-    const result = await runProfileTransaction(
-      { kind: 'install-npm', pkg: pkgName, version: latest.version, integrity: latest.integrity, signal: opts.signal },
-      { ...(deps?.transaction ?? {}), warmPackument: deps?.transaction?.warmPackument ?? makeNpmWarmPackument(timeoutMs) },
-    )
-    if (!result.ok) throw new TransactionError(result)
-    return {
-      id: pkgName,
-      pkg: result.pkg ?? pkgName,
-      spec: result.spec ?? `${pkgName}@${latest.version}`,
-      version: result.version ?? latest.version,
-      buildApprovals: result.buildApprovals ?? [],
-      fallbackAllBuilds: result.fallbackAllBuilds === true,
-      ...(result.bundleWarning ? { bundleWarning: result.bundleWarning } : {}),
-      needsRestart: true as const,
-      output: result.output,
-      healActions: result.healActions,
+    try {
+      const timeoutMs = cfg.timeoutMs ?? 20_000
+      const latest = await (deps?.npmLatest ?? defaultNpmLatest)(pkgName, timeoutMs, opts.signal)
+      if (!latest.integrity) {
+        throw new Error(`npm metadata 缺少 dist integrity：${pkgName}@${latest.version}，拒绝升级`)
+      }
+      const result = await runProfileTransaction(
+        { kind: 'install-npm', pkg: pkgName, version: latest.version, integrity: latest.integrity, signal: opts.signal },
+        { ...(deps?.transaction ?? {}), warmPackument: deps?.transaction?.warmPackument ?? makeNpmWarmPackument(timeoutMs) },
+      )
+      if (!result.ok) throw new TransactionError(result)
+      const payload: InstallResult = {
+        id: pkgName,
+        pkg: result.pkg ?? pkgName,
+        spec: result.spec ?? `${pkgName}@${latest.version}`,
+        version: result.version ?? latest.version,
+        buildApprovals: result.buildApprovals ?? [],
+        fallbackAllBuilds: result.fallbackAllBuilds === true,
+        ...(result.bundleWarning ? { bundleWarning: result.bundleWarning } : {}),
+        needsRestart: true as const,
+        output: result.output,
+        healActions: result.healActions,
+      }
+      await journalExternalOperation(
+        opts.channel,
+        {
+          kind: 'self-upgrade',
+          target: pkgName,
+          ...(currentVersion ? { fromVersion: currentVersion } : {}),
+          ...(payload.version ? { toVersion: payload.version } : {}),
+        },
+        'ok',
+        { appendExternalOperation: deps?.appendExternalOperation },
+      )
+      return payload
+    } catch (err) {
+      await journalExternalOperation(
+        opts.channel,
+        { kind: 'self-upgrade', target: pkgName, ...(currentVersion ? { fromVersion: currentVersion } : {}) },
+        'failed',
+        { reason: errText(err), appendExternalOperation: deps?.appendExternalOperation },
+      )
+      throw err
     }
   })
 }

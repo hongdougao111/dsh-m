@@ -20,6 +20,10 @@ import { readFile } from 'node:fs/promises'
 
 import { togglePlugin, ToggleError } from '../lib/core/toggle.js'
 
+// 0.9.79：直调 togglePlugin 会以 'external' 兜底落外部操作日志——隔离 journal
+// （node --test 文件级进程隔离，env 只活在本文件进程；同 upgrade-activation 的 cacheRoot 纪律）
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-toggle-journal-')), 'external-operations.json')
+
 let dir
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'dshm-toggle-'))

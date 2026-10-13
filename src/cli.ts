@@ -381,6 +381,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
           version,
           forceIncompatible: flags.force === true,
           namespace: 'cli',
+          channel: 'cli',
         })
       } catch (e) {
         if (e instanceof InstallGuardError) {
@@ -405,6 +406,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
         res = await d.upgradePlugin(target, cfg, {
           forceIncompatible: flags.force === true,
           namespace: 'cli',
+          channel: 'cli',
         })
       } catch (e) {
         if (e instanceof InstallGuardError) {
@@ -429,7 +431,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
       const offFlag = flags.off === true
       if (onFlag === offFlag) throw new Error('开关命令需要恰好一个 --on 或 --off')
       requireYes(flags, '切换插件运行状态')
-      const res = await d.togglePlugin(target, onFlag)
+      const res = await d.togglePlugin(target, onFlag, { channel: 'cli' })
       out(`✅ 已${onFlag ? '启用' : '停用'} ${res.pkg}（profile 文件已更新）`)
       if (res.applied === 'live') out('本次进程内已即时生效；重启后状态保持。')
       else out('需要重启 DSH Web 生效：dshm restart --yes')
@@ -439,7 +441,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
     case 'uninstall': {
       const target = needFlag(flags, 'pkg')
       requireYes(flags, '卸载')
-      const res = await d.uninstallPlugin(target, cfg, { namespace: 'cli' })
+      const res = await d.uninstallPlugin(target, cfg, { namespace: 'cli', channel: 'cli' })
       out(`✅ 已卸载 ${res.pkg}${res.liveDisabled ? '（运行中的界面已先下线）' : ''}`)
       if (res.leftovers.length) out(`ℹ️  疑似残留数据（未删除）：${res.leftovers.join('、')}`)
       out('需要重启 DSH Web 生效：dshm restart --yes')

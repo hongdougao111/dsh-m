@@ -316,10 +316,10 @@ export function registerTools(
       if (profile.kind !== 'web') {
         assertWriteAllowed(profile, 'install')
         // 0.9.8：补传服务解析 deps（此前漏传 → desktop 安装恒 no-manager，实机 2026-10-01）
-        return cloneJson(await m.desktopInstall(id, cfg, { version, forceIncompatible: force, namespace: 'host', profile: profile.name, profileDir: profile.dir }, { getService: getService as never, ensureService: ensureService as never }))
+        return cloneJson(await m.desktopInstall(id, cfg, { version, forceIncompatible: force, namespace: 'host', profile: profile.name, profileDir: profile.dir, channel: 'host-tool' }, { getService: getService as never, ensureService: ensureService as never }))
       }
       try {
-        return cloneJson(await m.installFromRegistry(id, cfg, { version, forceIncompatible: force, namespace: 'host' }))
+        return cloneJson(await m.installFromRegistry(id, cfg, { version, forceIncompatible: force, namespace: 'host', channel: 'host-tool' }))
       } catch (err) {
         if (err instanceof InstallGuardError) {
           // 结构化 error result（M2 Task 3 ㉑-㉜）：不渲染「已安装」，无 force 通道；restartSafe 随结果携带
@@ -361,9 +361,9 @@ export function registerTools(
       // 0.9.0：desktop → 官方管理器委派（服务缺席结构化拒绝）；web → 既有委派/降级
       if (profile.kind !== 'web') {
         assertWriteAllowed(profile, 'set-enabled')
-        return cloneJson(await m.desktopToggle(target, args.enabled, { getService: getService as never, ensureService: ensureService as never, profileDir: profile.dir }))
+        return cloneJson(await m.desktopToggle(target, args.enabled, { getService: getService as never, ensureService: ensureService as never, profileDir: profile.dir, channel: 'host-tool' }))
       }
-      return cloneJson(await toggle(target, args.enabled, { getService: getService as never }))
+      return cloneJson(await toggle(target, args.enabled, { getService: getService as never, channel: 'host-tool' }))
     },
   }))
 
@@ -392,9 +392,9 @@ export function registerTools(
       assertWriteAllowed(profile, 'uninstall')
       // 0.9.8：desktop → 官方管理器 removeBundle（dsh-market 同策略；此前该工具在 desktop 走 web 事务必然错位）
       if (profile.kind !== 'web') {
-        return cloneJson(await m.desktopUninstall(target, { getService: getService as never, ensureService: ensureService as never, profileDir: profile.dir }))
+        return cloneJson(await m.desktopUninstall(target, { getService: getService as never, ensureService: ensureService as never, profileDir: profile.dir, channel: 'host-tool' }))
       }
-      return cloneJson(await m.uninstallPlugin(target, cfg, { namespace: 'host' }))
+      return cloneJson(await m.uninstallPlugin(target, cfg, { namespace: 'host', channel: 'host-tool' }))
     },
   }))
 
@@ -481,10 +481,10 @@ export function registerTools(
       assertWriteAllowed(profile, 'upgrade')
       // 0.9.8：desktop → 官方管理器覆盖安装（dsh-market 同策略；此前该工具在 desktop 走 web 事务必然错位）
       if (profile.kind !== 'web') {
-        return cloneJson(await m.desktopUpgrade(target, cfg, { forceIncompatible: force, namespace: 'host', profile: profile.name, profileDir: profile.dir }, { getService: getService as never, ensureService: ensureService as never }))
+        return cloneJson(await m.desktopUpgrade(target, cfg, { forceIncompatible: force, namespace: 'host', profile: profile.name, profileDir: profile.dir, channel: 'host-tool' }, { getService: getService as never, ensureService: ensureService as never }))
       }
       try {
-        return cloneJson(await m.upgradePlugin(target, cfg, { forceIncompatible: force, namespace: 'host' }))
+        return cloneJson(await m.upgradePlugin(target, cfg, { forceIncompatible: force, namespace: 'host', channel: 'host-tool' }))
       } catch (err) {
         if (err instanceof InstallGuardError) {
           return { ok: false, guard: true, kind: err.kind, message: err.message, violations: err.violations, compensation: err.compensation, needsRestart: err.needsRestart, restartSafe: err.restartSafe, ...(err.repairBasis ? { repairBasis: err.repairBasis } : {}) }

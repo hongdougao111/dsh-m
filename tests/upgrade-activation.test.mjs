@@ -21,6 +21,8 @@ beforeEach(() => _resetMergedMarketForTests())
 // 隔离 cacheRoot（registry/latest 缓存不触碰真实 ~/.dsh，同 market.test.mjs 纪律）
 const testCacheRoot = mkdtempSync(join(tmpdir(), 'dshm-activation-'))
 process.env.DSHM_CACHE_DIR = testCacheRoot
+// 0.9.79：直调变更入口会以 'external' 兜底落外部操作日志——同款纪律隔离 journal
+process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(testCacheRoot, 'external-operations.json')
 afterEach(() => {})
 const cleanup = () => {}
 

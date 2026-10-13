@@ -24,6 +24,7 @@ import { isSingleRowPlugin, planRowOverride } from './patch-yaml.js'
 import { PROTECTED_MODULES } from './enablement.js'
 import { withMutationSession } from './market.js'
 import { setLivePluginDisabled, loaderHost, type LoaderEntry, type LoaderHost } from './live-plugin.js'
+import { journalExternalOperation, type OperationChannel, type AppendExternalOperation } from './external-journal.js'
 import { webProfileDir } from './env.js'
 
 export interface ToggleResult {
@@ -68,6 +69,10 @@ export interface ToggleDeps {
   getService?: () => PluginManagerLike | undefined
   loaderHost?: LoaderHost | undefined
   io?: ToggleIo
+  /** 调用通道（0.9.79 ADR-0018）：调用点显式传 'panel'|'cli'|'host-tool'；desktopToggle 透传；缺省 'external' */
+  channel?: OperationChannel
+  /** 外部操作直落钩子注入（R3-1；缺省 = 真实现 appendExternalOperation） */
+  appendExternalOperation?: AppendExternalOperation
 }
 
 /** 官方 change() 富结果的鸭子读（不建类型依赖）。 */
@@ -99,7 +104,22 @@ interface BundlesManifest {
 
 export function togglePlugin(pkg: string, enabled: boolean, deps: ToggleDeps = {}): Promise<ToggleResult> {
   // M2 Task 3：toggle 纳入统一 mutation session（本体单点获取；自身 file lock 在 session 内层）
-  return withMutationSession(() => togglePluginLocked(pkg, enabled, deps))
+  // 0.9.79 外部操作直落（ADR-0018）：终态后挂钩，成功与失败都记；append 失败被钩子吞（R1-1）
+  return withMutationSession(async () => {
+    try {
+      const result = await togglePluginLocked(pkg, enabled, deps)
+      await journalExternalOperation(deps.channel, { kind: 'toggle', target: pkg }, 'ok', {
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      return result
+    } catch (err) {
+      await journalExternalOperation(deps.channel, { kind: 'toggle', target: pkg }, 'failed', {
+        reason: err instanceof Error ? err.message : String(err),
+        appendExternalOperation: deps.appendExternalOperation,
+      })
+      throw err
+    }
+  })
 }
 
 async function togglePluginLocked(pkg: string, enabled: boolean, deps: ToggleDeps = {}): Promise<ToggleResult> {
