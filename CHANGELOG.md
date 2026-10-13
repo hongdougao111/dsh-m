@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.79 功能：外部操作记录——非面板通道（CLI / Agent 工具）变更直落审计日志进面板「已结束」（ADR-0018）
+
+- **问题（审计面脱节实证）**：全局操作记录的口径 = 面板发起——quota-watch 0.1.28 经 `dshm_upgrade`（Agent 工具）升级装机成功后，面板「已结束」列表零记录，操作审计面与真实系统状态脱节。CLI 与 Agent 工具是独立进程，写不进浏览器 localStorage 的操作泵。
+- **方案（ADR-0018：机器本地直落日志，与操作泵分离）**：新增 `$DSH_HOME/dshm/external-operations.json`（`DSHM_EXTERNAL_JOURNAL_FILE` 可覆盖；机器本地、不跨机同步）——九个公共变更入口增 `channel` 参数（`'panel'|'cli'|'host-tool'`，缺省 `'external'` 兜底），非面板通道的操作终态后直落一条记录：**成功与失败都记**、滚动 200 条、tmp+rename 原子写、损坏文件改名隔离、append 任何失败被钩子吞掉（至多 stderr 一行，绝不反噬操作终态，R1-1）；reason 截断 ≤300。desktop 口径（R1-2）：desktopToggle 透传 togglePlugin（唯一嵌套对，单笔事务一条记录）；desktopInstall/Uninstall/Upgrade 自记（call-graph audit 证实不经已插桩入口）；服务缺席拒绝自记 `desktop-toggle` failed。
+- **面板消费（内存 overlay 并读，不写 localStorage）**：host-api 新增 `external-operations`（list）与 `external-operations-clear` 两 method（鉴权沿既有宿主信任检查）；「已结束」列表 = 本地操作泵（localStorage，现状不动）+ 外部记录 overlay（服务端为唯一事实源，persist 路径零触碰——防服务端淘汰后被本地副本复活，R1-3）；渠道徽标 **Agent 工具** / **命令行** / 兜底**外部**（Q2b/R1-4）；失败记录点亮红点（Q4）；外部行不渲染单条 ✕（R2-3）；「清除已结束」连带清除服务端日志 + overlay 同步清空；fetch 时机 = 面板初始化 + 每次操作完成后 + 打开操作记录卡（不轮询，R1-6）；「已结束」计数改用合并后全量，最近 50 条渲染截断照旧（R1-7）。
+- **验证**：1423 项测试全绿（0.9.78 基线 1389 + 新增 34：journal 存储 8（滚动/损坏容错/panel 拒绝/无凭据/路径上抛/截断）、通道插桩 8（panel 零记录/cli、host-tool 各一条/嵌套单条/失败 failed/append 注入抛错不反噬）、host-api 4（list/clear/鉴权/注入位）、client 模型+视图 18（overlay 升序并读/persist 纯净/幂等/徽标/✕ 出口/计数/接线锚））、typecheck 零错误；测试全程零触碰真实 `~/.dsh`（11 个既有测试文件补 journal 隔离，沿用 cacheRoot 纪律）。实施计划经独立评审 Agent 三轮评审收敛；npm 发版与 dsh-m 自升级另行经用户确认。
+
 ### 0.9.78 性能：收藏 stale 检查零网络 + 市场页零增量提交守卫（钢人 C3）
 
 - **问题（钢人报告 C3 节）**：收藏 stale 判定只需要「id 还在不在目录」的成员布尔，却穿透富 market interface 的探测段——每次收藏区访问/切换（800ms debounce 合并后）仍是 N 条收藏 × full 查询，含每命中条 npm/github latest **网络扇出**且产物全部丢弃；叠加 toggle 后 refreshViews 四连响应无条件 `setData`——数据层精心维持的引用稳定性一次 setState 即蒸发。
@@ -564,6 +571,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Feature in 0.9.79 — external operation records: non-panel channels (CLI / agent tools) land terminal-state audit entries into the panel's Ended list (ADR-0018)
+
+- **Problem (audit-surface disconnect, real incident)**: the global operation records only covered panel-initiated changes — the quota-watch 0.1.28 upgrade via `dshm_upgrade` (an agent tool) installed successfully yet left zero rows in the panel's Ended list. CLI and agent tools are separate processes and cannot write the browser-localStorage operations pump.
+- **Solution (ADR-0018: machine-local direct-write journal, decoupled from the pump)**: a new `$DSH_HOME/dshm/external-operations.json` (overridable via `DSHM_EXTERNAL_JOURNAL_FILE`; machine-local, never synced across machines) — the nine public mutation entries gain a `channel` parameter (`'panel'|'cli'|'host-tool'`, defaulting to `'external'` as the audit-safe fallback). Non-panel operations append one terminal-state record after completion: **both success and failure are recorded**, rolling cap of 200, tmp+rename atomic writes, corrupted files quarantined by rename, and any append failure swallowed by the hook (at most one stderr line — it never back-fires onto the operation result, R1-1); `reason` truncated to 300 chars. Desktop accounting (R1-2): desktopToggle passes through to togglePlugin (the only nested pair — one transaction, one record); desktopInstall/Uninstall/Upgrade self-record (call-graph audit confirms they bypass instrumented entries); the service-absent structured refusal self-records `desktop-toggle` failed.
+- **Panel consumption (in-memory overlay, never localStorage)**: host-api gains `external-operations` (list) and `external-operations-clear` methods (auth rides the existing host trust check); the Ended list = local operations pump (localStorage, untouched) + external-records overlay (the server side is the single source of truth, persist path untouched — prevents local resurrection after server-side eviction, R1-3); channel badges **Agent tool** / **CLI** / fallback **External** (Q2b/R1-4); failed external entries light the red dot (Q4); external rows render no per-row ✕ (R2-3); Clear ended also clears the server journal plus the overlay; fetch timing = panel init + after each operation + opening the operations card (no polling, R1-6); the Ended count now uses the merged total while the last-50 render cap stays (R1-7).
+- **Verification**: 1423 tests green (0.9.78 baseline 1389 + 34 added: journal storage 8 (rolling / corruption quarantine / panel rejection / no-credentials / path error propagation / truncation), channel wiring 8 (panel zero-record / cli and host-tool one each / nested single record / failure recorded as failed / injected append failure never back-fires), host-api 4 (list / clear / auth / override slots), client model+view 18 (overlay ascending merge / persist purity / idempotence / badge / ✕ exit / count / wiring anchors)), typecheck clean; tests never touch the real `~/.dsh` (11 existing test files gained journal isolation, following the cacheRoot discipline). The implementation plan was closed over three independent review rounds; npm publish and dsh-m self-upgrade remain subject to separate user confirmation.
 
 ### Performance in 0.9.78 — favorites stale checks go cache-only: zero-network favorites access + zero-increment commit guard (steelman C3)
 
