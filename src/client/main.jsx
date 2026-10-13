@@ -27,7 +27,7 @@ const { RESTART_POLL_MS, RESTART_DEADLINE_MS, nextRestartWait, isAmbiguousRestar
 const { refreshAfterMutation } = require("./view-refresh.js");
 const { applyInstalledUpdates, installedUpdateStats } = require("./installed-updates.js");
 const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, TERMINAL_CLEARABLE, upgradeNotify, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
-const { groupOpsByDay, opRowVm, opUpgradeMeta } = require("./operations-view.js");
+const { groupOpsByDay, opRowVm, opUpgradeMeta, canRemoveRow, channelLabelKey } = require("./operations-view.js");
 const { createFavoritesStore, partitionStale } = require("./favorites.js");
 const { readSelfCheckCache, writeSelfCheckCache, clearSelfCheckCache, deriveChipState } = require("./self-check.js");
 const { shouldShowInstallCmd } = require("./install-cmd.js");
@@ -46,6 +46,8 @@ const ZH = {
   "op.superseded.note": "{target} 已跳过（前提已不成立或已手动处理）", "op.cancelled": "用户放弃确认", "op.remove": "移除记录", "op.panel.jump": "查看操作记录",
   "op.kind.install": "安装", "op.kind.upgrade": "升级", "op.kind.uninstall": "卸载", "op.kind.toggle": "开关",
   "op.kind.community-toggle": "社区目录开关", "op.kind.registry-url": "清单源变更",
+  "op.kind.self-upgrade": "自升级", "op.kind.desktop-install": "桌面安装", "op.kind.desktop-uninstall": "桌面卸载", "op.kind.desktop-upgrade": "桌面升级", "op.kind.desktop-toggle": "桌面开关",
+  "op.channel.host-tool": "Agent 工具", "op.channel.cli": "命令行", "op.channel.external": "外部",
   "op.state.on": "开", "op.state.off": "关",
   "op.status.queued": "排队中", "op.status.running": "进行中", "op.status.input": "待决", "op.status.done": "完成", "op.status.warned": "带警告", "op.status.failed": "失败", "op.status.superseded": "已跳过",
   "op.day.today": "今天", "op.day.yesterday": "昨天",
@@ -164,6 +166,8 @@ const EN = {
   "op.superseded.note": "{target} skipped (precondition gone or already handled)", "op.cancelled": "user cancelled", "op.remove": "Dismiss", "op.panel.jump": "Open operations card",
   "op.kind.install": "Install", "op.kind.upgrade": "Upgrade", "op.kind.uninstall": "Uninstall", "op.kind.toggle": "Toggle",
   "op.kind.community-toggle": "Community catalog toggle", "op.kind.registry-url": "Registry source change",
+  "op.kind.self-upgrade": "Self-upgrade", "op.kind.desktop-install": "Desktop install", "op.kind.desktop-uninstall": "Desktop uninstall", "op.kind.desktop-upgrade": "Desktop upgrade", "op.kind.desktop-toggle": "Desktop toggle",
+  "op.channel.host-tool": "Agent tool", "op.channel.cli": "CLI", "op.channel.external": "External",
   "op.state.on": "On", "op.state.off": "Off",
   "op.status.queued": "Queued", "op.status.running": "Running", "op.status.input": "Pending", "op.status.done": "Done", "op.status.warned": "Warned", "op.status.failed": "Failed", "op.status.superseded": "Skipped",
   "op.day.today": "Today", "op.day.yesterday": "Yesterday",
@@ -520,6 +524,8 @@ const CSS = `
 .dsvm-opdir{font-size:11px;line-height:16px;padding:0 6px;border-radius:8px;border:1px solid currentColor}
 .dsvm-opdir.on{color:#15803d}
 .dsvm-opdir.off{color:var(--dsw-alias-label-secondary,#4b5563)}
+/* 0.9.79 外部记录渠道徽标（Agent 工具/命令行/外部）：中性描边胶囊，与方向徽章同形不同色 */
+.dsvm-opchan{font-size:11px;line-height:16px;padding:0 6px;border-radius:8px;border:1px solid currentColor;color:var(--dsw-alias-label-caption,#9ca3af)}
 .dsvm-opver{font-size:11px;color:var(--dsw-alias-label-secondary,#4b5563);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .dsvm-favbtn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-caption,#9ca3af);font-size:15px;line-height:1;cursor:pointer;padding:0 2px;margin-left:auto}
 .dsvm-favbtn:hover{color:var(--dsw-alias-state-business-primary,#4d6bfe)}
@@ -3106,7 +3112,10 @@ function useScrollableContain(dep) {
 // （store 无上限，滚动区只管 UI 高度，条数上限防 DOM 无界增长）。
 function OperationsCard({ records, onClearFinished, onRemove }) {
   const active = records.filter((r) => r.status === "queued" || r.status === "running" || r.status === "input");
-  const finished = records.filter((r) => active.indexOf(r) < 0).slice(-50);
+  // 0.9.79（R1-7）：标题计数 = 合并后全量终态总数；slice(-50) 只作渲染截断（最近 50 条照旧），
+  // 外部记录并入后计数不再因截断失真。
+  const finishedAll = records.filter((r) => active.indexOf(r) < 0);
+  const finished = finishedAll.slice(-50);
   // 0.9.6：清除按钮覆盖全部终态（含 failed/superseded，主人裁决）——无可清终态时置灰并说明，
   // 不再做无声 no-op（Windows 实机反馈：按钮对着失败记录点了没反应）。
   const clearable = records.some((r) => TERMINAL_CLEARABLE.has(r.status));
@@ -3120,6 +3129,7 @@ function OperationsCard({ records, onClearFinished, onRemove }) {
   // 字段缺席逐段省略（等价旧行），target 恒在。0.9.76：「对话」来源徽章退役——meta.session
   // 是泵所有权标记（GUI 的 runOp 与对话镜像两路同打、persist 时剥离），不是来源语义，
   // 展示层不得消费（0.9.75 把它渲染成「对话」徽章属误报，主人界面全点按钮即全员误标）。
+  // 0.9.79：外部记录行追加渠道徽标（lookup(channelLabelKey)，Agent 工具/命令行/外部兜底）。
   const row = (r) => {
     const vm = opRowVm(r);
     const tip = [vm.full, vm.durText, r.error || r.warning || ""].filter(Boolean).join(" · ");
@@ -3129,6 +3139,7 @@ function OperationsCard({ records, onClearFinished, onRemove }) {
       vm.clock ? h("span", { className: "dsvm-optime", title: vm.full }, vm.clock) : null,
       h("span", { className: "dsvm-opstatus" }, lookup("op.status." + r.status)),
       h("span", { className: "dsvm-opkind" }, lookup("op.kind." + r.kind)),
+      vm.channel ? h("span", { className: "dsvm-opchan", title: lookup(channelLabelKey(vm.channel)) }, lookup(channelLabelKey(vm.channel))) : null,
       vm.dir ? h("span", { className: `dsvm-opdir ${vm.dir}` }, lookup(vm.dir === "on" ? "op.state.on" : "op.state.off")) : null,
       h("span", { className: "dsvm-optarget", title: tip || undefined }, vm.target),
       vm.version ? h("span", { className: "dsvm-opver", title: tip || undefined }, vm.version) : null,
@@ -3136,8 +3147,10 @@ function OperationsCard({ records, onClearFinished, onRemove }) {
       r.status === "running" ? Spin() : null,
       r.error ? h("span", { className: "dsvm-opnote" }, r.error) : null,
       r.warning ? h("span", { className: "dsvm-opnote" }, r.warning) : null,
-      // 单条移除（终审·新伤2）：input/failed/superseded 行给出口（对话区来源的 input 不再永挂）
-      (r.status === "input" || r.status === "failed" || r.status === "superseded") && onRemove
+      // 单条移除（终审·新伤2 → 0.9.79 R3-1/R2-3）：出口判定下沉 canRemoveRow——
+      // 本地 input/failed/superseded 保留 ✕；外部记录（channel 非空）不给单条 ✕（防按 id 复活），
+      // 移除出口仅「清除已结束」。
+      canRemoveRow(r) && onRemove
         ? h("button", { className: "dshm-xbtn", title: lookup("op.remove"), onClick: () => onRemove(r.id) }, h(XIcon))
         : null,
     );
@@ -3152,7 +3165,7 @@ function OperationsCard({ records, onClearFinished, onRemove }) {
       ? h(
           "div",
           { className: "dsvm-ops-caption", style: { marginTop: active.length ? "7px" : "0" } },
-          lookup("settings.ops.group.done.n", { n: finished.length }),
+          lookup("settings.ops.group.done.n", { n: finishedAll.length }),
         )
       : null,
     finished.length
@@ -3522,8 +3535,30 @@ function MarketPanel({ onClose }) {
   // 两段加载（ADR-0008）第二段：探测 TTL=0 永远新鲜，挂载即与第一段并行发起；未到时卡片暂无更新提示
   const updates = useAsync(() => api("installedUpdates"), []);
   // 全局操作记录（0.7.0 Task 13 + 审计碰撞修正）：单例 store + 泵执行（queued 真实生命周期）
-  const [opRecords, setOpRecords] = useState(() => opsStore.list().map((r) => ({ ...r })));
-  const syncOps = useCallback(() => setOpRecords(opsStore.list().map((r) => ({ ...r }))), []);
+  // 0.9.79：渲染数据源 = 本地 + 外部合并视图（listMerged，ADR-0018）；泵/恢复仍只看本地 list()
+  const [opRecords, setOpRecords] = useState(() => opsStore.listMerged().map((r) => ({ ...r })));
+  const syncOps = useCallback(() => setOpRecords(opsStore.listMerged().map((r) => ({ ...r }))), []);
+  // 外部操作记录（0.9.79 ADR-0018 R1-6）：面板初始化 + 每次操作完成后（runOp.finally）+
+  // 打开操作记录卡（settings tab）时各 fetch 一次——常驻期间他终端变更不做轮询（一期明示）；
+  // 拉取失败静默（overlay 保持上次状态，下次时机重试）；id 幂等合并由 store.setExternal 承担。
+  const fetchExternalOps = useCallback(async () => {
+    try {
+      const r = await api("external-operations");
+      if (r && Array.isArray(r.records)) {
+        opsStore.setExternal(r.records);
+        syncOps();
+      }
+    } catch {
+      /* 增量审计面，不干扰主流程 */
+    }
+  }, [syncOps]);
+  useEffect(() => {
+    void fetchExternalOps(); // 面板初始化
+  }, [fetchExternalOps]);
+  // 打开操作记录卡（settings tab）时拉取一次（R1-6）：查看动作即刷新点，不做常驻轮询
+  useEffect(() => {
+    if (tab === "settings") void fetchExternalOps();
+  }, [tab, fetchExternalOps]);
   // 操作记录卡跳转（第二批）：切到设置 tab 后等 React 提交再滚动定位到卡片
   const openOps = useCallback(() => {
     setTab("settings");
@@ -3540,8 +3575,12 @@ function MarketPanel({ onClose }) {
     (kind, target, exec, meta = {}, reuseId) =>
       // session:true = 活会话标记（终审·新伤1）：重挂载的 restore 跳过（泵仍拥有）；persist 时剥离。
       // 入队与 waiters/原始错误保真都在 createOpsPump（评审 P4：实现与测试同源）。
-      opsPump.enqueue({ ...(reuseId ? { id: reuseId } : {}), kind, target, status: "queued", meta: { ...meta, session: true } }, exec),
-    [],
+      // 0.9.79（R1-6）：操作终态后连带拉取一次外部记录——他终端（CLI/Agent 工具）的并发变更
+      // 尽快可见；拉取失败静默。
+      opsPump.enqueue({ ...(reuseId ? { id: reuseId } : {}), kind, target, status: "queued", meta: { ...meta, session: true } }, exec).finally(() => {
+        void fetchExternalOps();
+      }),
+    [fetchExternalOps],
   );
   /** 处置待决记录（CompatDialog 取消 → superseded「用户放弃」）。 */
   const disposeOp = useCallback((id, note) => {
@@ -3778,7 +3817,10 @@ function MarketPanel({ onClose }) {
           opsRecords: opRecords,
           onOpsClearFinished: () => {
             opsStore.clearFinished();
+            opsStore.clearExternal(); // 0.9.79：外部记录 overlay 同步清空（R1-3 overlay 语义）
             syncOps();
+            // 服务端连带清除（ADR-0018）：失败静默——服务端仍是唯一事实源，下次 fetch 幂等并回
+            void api("external-operations-clear").catch(() => {});
           },
           onOpsRemove: (id) => {
             opsStore.remove(id);

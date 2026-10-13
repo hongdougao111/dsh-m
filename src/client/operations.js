@@ -31,6 +31,30 @@ export const OP_STORAGE_KEY = 'dshm-operations'
 export const REGISTRY_DEFAULT_TARGET = '(default)'
 
 /**
+ * 外部操作记录（服务端 ExternalOperationRecord，ADR-0018）→ 渲染记录（OperationRecord 形态）映射
+ * （0.9.79）：终态直落语义——result:'ok'→'done'、'failed'→'failed'（永不 queued/running）；
+ * at→createdAt/updatedAt；reason→error（红点数据源）；fromVersion/toVersion→meta.from/to
+ * （升级版本串经 opRowVm 照常派生）；channel 原样携带（渠道徽标 + 单条移除出口判定）。
+ */
+export function externalToRecord(er) {
+  if (!er || typeof er !== 'object') return null
+  const meta = {}
+  if (typeof er.fromVersion === 'string' && er.fromVersion !== '') meta.from = er.fromVersion
+  if (typeof er.toVersion === 'string' && er.toVersion !== '') meta.to = er.toVersion
+  return {
+    id: typeof er.id === 'string' && er.id !== '' ? er.id : `ext-${er.at ?? 'unknown'}`,
+    kind: er.kind,
+    target: typeof er.target === 'string' ? er.target : '',
+    status: er.result === 'failed' ? 'failed' : 'done',
+    createdAt: Number.isFinite(er.at) ? er.at : 0,
+    updatedAt: Number.isFinite(er.at) ? er.at : 0,
+    channel: typeof er.channel === 'string' && er.channel !== '' ? er.channel : 'external',
+    ...(er.reason ? { error: String(er.reason) } : {}),
+    ...(Object.keys(meta).length > 0 ? { meta } : {}),
+  }
+}
+
+/**
  * @typedef {'install'|'upgrade'|'uninstall'|'toggle'|'community-toggle'|'registry-url'} OpKind
  * @typedef {'queued'|'running'|'input'|'done'|'warned'|'failed'|'superseded'} OpStatus
  */
@@ -103,6 +127,10 @@ export function createOperationsStore(storage) {
   const s = storageOf(storage)
   let records = safeParse(s.read())
   let persistDegraded = false
+  // 外部操作记录 overlay（0.9.79 ADR-0018）：服务端（机器本地 journal）为唯一事实源，
+  // fetch 后只进内存——绝不写 localStorage（R1-3：否则服务端滚动淘汰/清除后被本地副本复活，
+  // 且每浏览器各留一份）。泵/恢复语义只看 records（本地），overlay 零扰动。
+  let externalOverlay = []
 
   const persist = () => {
     if (persistDegraded) return
@@ -120,6 +148,28 @@ export function createOperationsStore(storage) {
     /** @returns {OperationRecord[]} 当前记录（浅拷贝） */
     list() {
       return records.map((r) => ({ ...r }))
+    },
+    /** 外部记录 overlay（内存）：id 幂等合并（后到值覆盖），返回合并视图。 */
+    setExternal(next) {
+      const incoming = (Array.isArray(next) ? next : []).filter((r) => r && typeof r === 'object' && typeof r.id === 'string')
+      const byId = new Map(externalOverlay.map((r) => [r.id, r]))
+      for (const r of incoming) byId.set(r.id, { ...(byId.get(r.id) || {}), ...r })
+      externalOverlay = [...byId.values()]
+      return this.listMerged()
+    },
+    /** 清空外部 overlay（「清除已结束」联动 external-operations-clear 成功后调用）。 */
+    clearExternal() {
+      externalOverlay = []
+      return this.listMerged()
+    },
+    /** @returns {OperationRecord[]} 外部 overlay 当前快照（原始形态，浅拷贝）。 */
+    externalList() {
+      return externalOverlay.map((r) => ({ ...r }))
+    },
+    /** 本地 + 外部合并视图：外部映射为渲染记录后与本地按 createdAt 升序（groupOpsByDay 假定升序输入）。 */
+    listMerged() {
+      const external = externalOverlay.map(externalToRecord).filter(Boolean)
+      return [...records.map((r) => ({ ...r })), ...external].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
     },
     get persistDegraded() {
       return persistDegraded

@@ -113,5 +113,26 @@ export function opRowVm(r) {
     dir: isToggle && typeof meta.on === 'boolean' ? (meta.on ? 'on' : 'off') : null,
     version,
     target: typeof rec.target === 'string' ? rec.target : '',
+    // 外部记录渠道标记（0.9.79 ADR-0018）：非空 = 渠道徽标渲染 + 无单条 ✕ 出口
+    channel: typeof rec.channel === 'string' && rec.channel !== '' ? rec.channel : null,
   }
+}
+
+/**
+ * 单条移除出口判定（0.9.79 R3-1 下沉 + R2-3）：本地记录维持 input/failed/superseded 出口；
+ * 外部记录（channel 非空）一律不给单条 ✕——服务端为唯一事实源，✕ 移除后下次 fetch 会按 id
+ * 复活；外部行的移除出口仅「清除已结束」（连带 external-operations-clear）。
+ */
+export function canRemoveRow(r) {
+  if (!r || typeof r !== 'object') return false
+  if (r.channel) return false
+  return r.status === 'input' || r.status === 'failed' || r.status === 'superseded'
+}
+
+/**
+ * 渠道徽标 i18n 键（0.9.79 R1-4）：host-tool/cli 各归其键，其余（external/未知/缺席）兜底
+ * op.channel.external——文案由 main.jsx 的 lookup 承担（Agent 工具 / 命令行 / 外部，Q2b）。
+ */
+export function channelLabelKey(channel) {
+  return `op.channel.${channel === 'host-tool' || channel === 'cli' ? channel : 'external'}`
 }

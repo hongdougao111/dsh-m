@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
-import { pad2, fmtOpClock, fmtOpFull, opDayKey, fmtOpDuration, opUpgradeMeta, groupOpsByDay, opRowVm } from '../src/client/operations-view.js'
+import { externalToRecord } from '../src/client/operations.js'
+import { pad2, fmtOpClock, fmtOpFull, opDayKey, fmtOpDuration, opUpgradeMeta, groupOpsByDay, opRowVm, channelLabelKey, canRemoveRow } from '../src/client/operations-view.js'
 
 const root = join(fileURLToPath(import.meta.url), '..', '..')
 
@@ -179,5 +180,91 @@ describe('main.jsx 操作记录增强接线结构锚', () => {
     assert.equal(src.includes('op.session.tip'), false, '来源徽章 i18n 键不得残留')
     const vmSrc = readFileSync(join(root, 'src/client/operations-view.js'), 'utf8')
     assert.equal(vmSrc.includes('session:'), false, 'opRowVm 不得派生 session 字段')
+  })
+})
+
+// ---------- 外部操作记录并读渲染（0.9.79，ADR-0018 Task 5） ----------
+
+describe('外部记录 × 视图模型（渠道徽标/单条移除出口/按日分组不破）', () => {
+  it('⑤channelLabelKey：host-tool/cli 各归其键，其余（含 external/未知）兜底 op.channel.external（R1-4）', () => {
+    assert.equal(channelLabelKey('host-tool'), 'op.channel.host-tool')
+    assert.equal(channelLabelKey('cli'), 'op.channel.cli')
+    assert.equal(channelLabelKey('external'), 'op.channel.external')
+    assert.equal(channelLabelKey(undefined), 'op.channel.external')
+    assert.equal(channelLabelKey('weird'), 'op.channel.external')
+  })
+
+  it('⑤opRowVm 暴露 channel（外部行渠道徽标数据源；本地记录 null）', () => {
+    const base = { id: 'r', createdAt: new Date(2026, 9, 13, 12, 0, 0).getTime() }
+    assert.equal(opRowVm({ ...base, kind: 'upgrade', status: 'done', channel: 'host-tool' }).channel, 'host-tool')
+    assert.equal(opRowVm({ ...base, kind: 'install', status: 'done', channel: 'cli' }).channel, 'cli')
+    assert.equal(opRowVm({ ...base, kind: 'install', status: 'done' }).channel, null, '本地记录无渠道')
+    // 升级版本串经 meta.from/to 照常派生（外部映射层已落 meta）
+    assert.equal(opRowVm({ ...base, kind: 'upgrade', status: 'done', channel: 'cli', meta: { from: '1.0.0', to: '2.0.0' } }).version, 'v1.0.0→v2.0.0')
+  })
+
+  it('⑥canRemoveRow：channel 非空一律 false（R2-3）；本地记录维持 input/failed/superseded 出口', () => {
+    const base = { id: 'r', createdAt: 1 }
+    for (const status of ['input', 'failed', 'superseded']) {
+      assert.equal(canRemoveRow({ ...base, status }), true, `本地 ${status} 保留单条 ✕`)
+      assert.equal(canRemoveRow({ ...base, status, channel: 'cli' }), false, `外部 ${status} 不给单条 ✕`)
+    }
+    for (const status of ['queued', 'running', 'done', 'warned']) {
+      assert.equal(canRemoveRow({ ...base, status }), false)
+      assert.equal(canRemoveRow({ ...base, status, channel: 'host-tool' }), false)
+    }
+    assert.equal(canRemoveRow(null), false, '非法输入安全')
+  })
+
+  it('⑤外部记录按日分组不破（externalToRecord 映射后与本地同构）', () => {
+    const now = new Date(2026, 9, 13, 12, 0, 0).getTime()
+    const merged = [
+      { id: 'l1', kind: 'install', status: 'done', createdAt: now - 86400000, updatedAt: now - 86400000 }, // 昨天
+      externalToRecord({ id: 'e1', at: now + 1000, channel: 'cli', kind: 'install', target: 'x', result: 'ok' }), // 今天
+    ]
+    const groups = groupOpsByDay(merged, now)
+    assert.equal(groups.length, 2)
+    assert.deepEqual(groups[0].records.map((r) => r.id), ['e1'], '升序输入 → 最新组在前')
+    assert.deepEqual(groups[1].records.map((r) => r.id), ['l1'])
+    assert.equal(groups[0].records[0].channel, 'cli')
+  })
+})
+
+describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
+  const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+  it('⑤渠道徽标渲染 + i18n 键在位', () => {
+    assert.ok(src.includes('dsvm-opchan'), '渠道徽标类名')
+    assert.ok(src.includes('channelLabelKey('), '徽标文案必须走 channelLabelKey')
+    assert.ok(src.includes('"op.channel.host-tool": "Agent 工具"'), 'ZH 键：Agent 工具（Q2b）')
+    assert.ok(src.includes('"op.channel.cli": "命令行"'), 'ZH 键：命令行（Q2b）')
+    assert.ok(src.includes('"op.channel.external": "外部"'), 'ZH 键：兜底外部（R1-4）')
+    assert.ok(src.includes('"op.kind.self-upgrade"'), '新 kind：self-upgrade')
+    assert.ok(src.includes('"op.kind.desktop-install"'), '新 kind：desktop-install')
+    assert.ok(src.includes('"op.kind.desktop-upgrade"'), '新 kind：desktop-upgrade')
+    assert.ok(src.includes('"op.kind.desktop-uninstall"'), '新 kind：desktop-uninstall')
+    assert.ok(src.includes('"op.kind.desktop-toggle"'), '新 kind：desktop-toggle')
+  })
+  it('⑥单条 ✕ 出口改走 canRemoveRow（内联判定退役）', () => {
+    assert.ok(src.includes('canRemoveRow(r)'), '行渲染必须消费 canRemoveRow')
+    assert.equal(src.includes('r.status === "input" || r.status === "failed" || r.status === "superseded"'), false, 'main.jsx 内联可移除判定退役（R3-1 下沉 operations-view）')
+  })
+  it('②清除联动 external-operations-clear；fetch 时机三处（R1-6）；persist 纯净', () => {
+    assert.ok(src.includes('api("external-operations")'), '读取 method')
+    assert.ok(src.includes('api("external-operations-clear")'), '清除联动 method')
+    assert.ok(src.includes('opsStore.setExternal('), 'overlay 并入')
+    assert.ok(src.includes('opsStore.clearExternal()'), '清除联动 overlay 清空')
+    assert.ok(src.includes('opsStore.listMerged()'), '渲染数据源 = 合并视图')
+    // fetch 时机：面板初始化 + 操作完成后 + settings tab（操作记录卡）打开
+    assert.ok(src.includes('fetchExternalOps'), '具名 fetch 函数')
+  })
+  it('⑦已结束计数 = 合并后总数（R1-7）：渲染截断 slice(-50) 照旧、计数用全量', () => {
+    assert.ok(src.includes('finishedAll'), '全量终态列表变量在位')
+    assert.ok(src.includes('settings.ops.group.done.n', ), '计数键沿用')
+    assert.ok(/group\.done\.n.*finishedAll\.length/s.test(src), '计数实参 = finishedAll.length')
+  })
+  it('外部记录 overlay 不写 localStorage（R1-3 结构锚）', () => {
+    const modelSrc = readFileSync(join(root, 'src/client/operations.js'), 'utf8')
+    assert.ok(modelSrc.includes('externalOverlay'), 'overlay 数组在位')
+    assert.ok(modelSrc.includes('JSON.stringify(records.map'), 'persist 序列化只含本地 records（overlay 永不进 persist 路径）')
   })
 })

@@ -7,6 +7,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
+import { groupOpsByDay } from '../src/client/operations-view.js'
 
 /** localStorage mock（可注入故障）。 */
 function memStorage() {
@@ -488,5 +489,81 @@ describe('设置类终态直落记录（2026-10-10：community-toggle / registry
     // 评审 M3：target 是对象身份而非包名——即使数据异常落入 queued，opAppliesTo(空 installed)=false
     // ⇒ restoreRecords 改标 superseded，不会进 dispatchRestored 的 set-enabled 兜底分支误执行。
     assert.equal(opAppliesTo(store.list()[0], []), false)
+  })
+})
+
+// ---------- 外部操作记录 overlay（0.9.79，ADR-0018：内存并读，不写 localStorage） ----------
+
+describe('createOperationsStore × 外部记录 overlay（Task 5）', () => {
+  const ext = (over = {}) => ({
+    id: 'ext-1',
+    at: 1_000,
+    channel: 'cli',
+    kind: 'upgrade',
+    target: 'demo-pkg',
+    fromVersion: '1.0.0',
+    toVersion: '2.0.0',
+    result: 'ok',
+    ...over,
+  })
+
+  it('①setExternal 并入 listMerged：与本地记录按 createdAt 升序（groupOpsByDay 假定升序输入）', () => {
+    const store = createOperationsStore(memStorage())
+    store.upsert(rec({ id: 'local-1', createdAt: 3_000, updatedAt: 3_000, status: 'done' }))
+    store.setExternal([ext({ id: 'ext-early', at: 1_000 }), ext({ id: 'ext-late', at: 5_000 })])
+    const merged = store.listMerged()
+    assert.deepEqual(merged.map((r) => r.id), ['ext-early', 'local-1', 'ext-late'], '升序统一序列')
+    // 升序喂 groupOpsByDay 不破分组（组内新→旧由视图层反转）
+    const groups = groupOpsByDay(merged)
+    assert.ok(groups.length >= 1)
+    // 外部记录映射：result→status、at→createdAt、reason→error、from/to→meta
+    const e = merged.find((r) => r.id === 'ext-early')
+    assert.equal(e.status, 'done')
+    assert.equal(e.createdAt, 1_000)
+    assert.equal(e.channel, 'cli')
+    assert.deepEqual(e.meta, { from: '1.0.0', to: '2.0.0' })
+    const ef = merged.find((r) => r.id === 'ext-late')
+    assert.equal(ef.kind, 'upgrade')
+  })
+
+  it('②persist 序列化不含外部记录（localStorage 纯净性，R1-3）；clearExternal 同步清空 overlay', () => {
+    const storage = memStorage()
+    const store = createOperationsStore(storage)
+    store.upsert(rec({ id: 'local-keep', status: 'done' }))
+    store.setExternal([ext({ id: 'ext-only-server' })])
+    const persisted = JSON.parse(storage.getItem(OP_STORAGE_KEY))
+    assert.ok(persisted.every((r) => r.id !== 'ext-only-server'), '外部记录绝不进 persist 路径')
+    assert.equal(store.listMerged().some((r) => r.id === 'ext-only-server'), true, 'overlay 在内存中可见')
+    store.clearExternal()
+    assert.equal(store.listMerged().some((r) => r.id === 'ext-only-server'), false, '清除联动后 overlay 清空')
+    assert.equal(store.list().some((r) => r.id === 'local-keep'), true, '本地记录不受影响')
+  })
+
+  it('③按 id 幂等：重复 fetch 同 id 不产生双条（新值覆盖旧值）', () => {
+    const store = createOperationsStore(memStorage())
+    store.setExternal([ext({ id: 'same', result: 'failed', reason: 'v1' })])
+    store.setExternal([ext({ id: 'same', result: 'failed', reason: 'v2' })])
+    store.setExternal([ext({ id: 'other' })])
+    const merged = store.listMerged().filter((r) => r.id === 'same')
+    assert.equal(merged.length, 1, '同 id 合并为一条')
+    assert.equal(merged[0].error, 'v2', '后到值覆盖（reason 经 externalToRecord 映射为 error）')
+  })
+
+  it('④failed 外部记录点亮红点：映射为 failed 状态（opsAttention 数据源语义）', () => {
+    const store = createOperationsStore(memStorage())
+    store.setExternal([ext({ id: 'bad', result: 'failed', reason: 'boom' })])
+    const m = store.listMerged().find((r) => r.id === 'bad')
+    assert.equal(m.status, 'failed', 'opsAttention 的 failed/warned 判定据此点亮')
+    assert.equal(m.error, 'boom')
+    // 成功记录不点亮
+    store.setExternal([ext({ id: 'good', result: 'ok' })])
+    assert.equal(store.listMerged().find((r) => r.id === 'good').status, 'done')
+  })
+
+  it('外部记录不入泵生命周期：list() 纯本地，泵/恢复语义零扰动', () => {
+    const store = createOperationsStore(memStorage())
+    store.setExternal([ext({ id: 'ext-x' })])
+    assert.equal(store.list().length, 0, 'list() 不含外部记录（泵/restore 只看本地）')
+    assert.equal(store.listMerged().length, 1, 'listMerged() 并读两类')
   })
 })
