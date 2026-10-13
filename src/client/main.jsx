@@ -2784,6 +2784,9 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
       h("span", { className: "rl" }, lookup(labelKey)),
       h("span", { className: "rv" }, valueNode),
     );
+  // 开关入标题行（2026-10-13 UX 修复·方案A）：原先开关行固定在 body 末尾，关态 5 行元信息
+  // 消失会把开关上提约 5 行高；标题行位置恒定 → 开关 ON/OFF 零移动，且与已装卡片右上角
+  // 开关同一交互语言。语义保留在 title tooltip（settings.community.toggle）。
   const communitySwitch = h(
     "label",
     {
@@ -2798,19 +2801,12 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
     }),
     h("span", { className: "dshm-switch-slider" }),
   );
-  const communitySwitchRow = h(
-    "div",
-    { className: "dshm-kvline-row" },
-    h("span", { className: "rl" }, lookup("settings.community.toggle")),
-    communitySwitch,
-  );
   const communityBody =
     communityOn === false
       ? h(
           React.Fragment,
           null,
           h("div", { className: "dshm-hint" }, lookup("settings.community.off")),
-          communitySwitchRow,
         )
       : h(
           "div",
@@ -2825,17 +2821,16 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
           kvlineRow("settings.community.route", communityLive ? communitySummary.route || "—" : "—"),
           kvlineRow("settings.community.count", communityLive ? lookup("settings.community.count.v", { n: communitySummary.acceptedCount ?? 0, up: communitySummary.upstreamCount ?? "—" }) : "—"),
           kvlineRow("settings.community.displaced", communityLive ? lookup("settings.community.displaced.v", { n: communitySummary.displaced ?? 0 }) : "—"),
-          communitySwitchRow,
         );
   // 两清单并排（终审 2026-10-09 mock 定稿）：常态 4:7；全屏关于升三卡行（4:7:3，不封顶）；≤760px 单列
   return h(
     "div",
     { className: "dshm-settings-grid" },
-    // ① 社区清单（awesome-dsh-plugin）：左卡；清爽列表 + 发丝分隔线，开关为列表末行
+    // ① 社区清单（awesome-dsh-plugin）：左卡；开关在标题行右侧（位置恒定，2026-10-13 方案A）
     h(
       "div",
       { className: "dshm-section" },
-      h("div", { className: "dshm-section-title" }, lookup("settings.community")),
+      h("div", { className: "dshm-section-title" }, lookup("settings.community"), communitySwitch),
       communityBody,
       communitySummary && Array.isArray(communitySummary.errors) && communitySummary.errors.length && communityOn !== false
         ? h("div", { className: "dshm-err" }, communitySummary.errors.join("；"))
