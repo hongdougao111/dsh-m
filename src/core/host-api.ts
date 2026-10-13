@@ -20,6 +20,7 @@ import {
   InstallGuardError,
 } from './market.js'
 import { runProfileTransaction, TransactionError, makeNpmWarmPackument } from './profile-transaction.js'
+import { listExternalOperations, clearExternalOperations } from './external-journal.js'
 import { readInstalledPluginReadme, type PluginReadme } from './installed.js'
 import { loadPrimaryScreenshots } from './primary-screenshots.js'
 import { isNewerVersion, npmLatest, npmPackumentReadme } from './versions.js'
@@ -86,6 +87,9 @@ export interface HostApiOverrides {
   desktopUpgrade?: typeof desktopUpgradeFromRegistry
   /** 0.9.8：同步探测缺席时的官方惰性服务拉起（host 侧 cordis inject 实现）。 */
   ensureService?: (timeoutMs?: number) => Promise<PluginManagerLike | undefined>
+  /** 0.9.79 外部操作记录（ADR-0018）：读取/清除注入位（测试；缺省 = 真实现）。 */
+  listExternalOperations?: typeof listExternalOperations
+  clearExternalOperations?: typeof clearExternalOperations
 }
 
 export interface HostApiContext {
@@ -294,6 +298,8 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
     desktopUninstall: ctx.deps?.desktopUninstall ?? desktopUninstall,
     desktopUpgrade: ctx.deps?.desktopUpgrade ?? desktopUpgradeFromRegistry,
     ensureService: ctx.deps?.ensureService,
+    listExternalOperations: ctx.deps?.listExternalOperations ?? listExternalOperations,
+    clearExternalOperations: ctx.deps?.clearExternalOperations ?? clearExternalOperations,
   }
   const cfg = (): typeof ctx.controller.config => ctx.controller.config
   // 0.9.0：宿主信任检查委派（含 ping 与未知 method，fail-closed）；
@@ -638,6 +644,20 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             channel: 'panel',
           })
           payload = { ...result }
+          break
+        }
+
+        case 'external-operations': {
+          // 0.9.79 外部操作记录（ADR-0018）：面板「已结束」overlay 数据源；鉴权走方法分发前的
+          // 既有宿主信任检查（零新增特例）
+          const records = await d.listExternalOperations()
+          payload = { records }
+          break
+        }
+
+        case 'external-operations-clear': {
+          await d.clearExternalOperations()
+          payload = {}
           break
         }
 
