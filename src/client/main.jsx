@@ -631,8 +631,12 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-entry svg{flex:none;width:16px;height:16px}
 .dshm-entry span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 收起（rail）态：与宿主设置入口 / dsh-skins 同几何——36×36 圆形、margin 8/10、
-   图标 18、内容水平居中。缺这套会导致收起时图标偏离轴线且行距不齐（实测左偏 ~4px）。 */
-.dshm-entry.rail{width:36px;height:36px;margin:8px 0 10px;padding:0;justify-content:center;border-radius:50%;gap:0}
+   图标 18、内容水平居中。缺这套会导致收起时图标偏离轴线且行距不齐（实测左偏 ~4px）。
+   2026-10-14：左右 margin 改 auto——槽位出口是列向 flex，36px 定宽按钮默认贴交叉轴
+   起点（左侧）；桌面 rail 窄只有 ~4px 可感知，手机宽 rail 左偏 ~22px（手机截图像素
+   实测：齿轮/调色盘/鲸鱼 cx≈99-100，市场四宫格 cx=77.5，rail 中线≈100）。auto
+   margin 与 dsh-skins rail 包装层 justify-content:center 等效（palette cx=100.5）。 */
+.dshm-entry.rail{width:36px;height:36px;margin:8px auto 10px;padding:0;justify-content:center;border-radius:50%;gap:0}
 .dshm-entry.rail svg{width:18px;height:18px}
 [data-slot="sidebar.footer.action"]{display:flex!important;flex-direction:column;width:100%;min-width:0}
 [data-slot="sidebar.footer.action"]>*{flex:none;min-width:0}
