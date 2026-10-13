@@ -25,3 +25,7 @@ dsh-m 的全局操作记录（DESIGN §2.6）长期明示口径 = **面板发起
 - **行为了解边界**：面板常驻期间他终端的变更不做轮询，fetch 时机 = 面板初始化 + 每次操作完成后 + 打开操作记录卡时（R1-6，一期明示）；「已结束」标题计数改用合并后总数，最近 50 条渲染截断照旧（R1-7）。
 - **GLOSSARY**：「外部通道（External Channel）」「外部操作记录（External Operation Record）」两词条已入档（随本 ADR 同批入库）。
 - **发布形态**：v1 = 0.9.79；npm 发版与 dsh-m 自升级另行经用户确认，不在实施计划内。
+
+## 修订（0.9.82，2026-10-14）
+
+- **外部 failed 行开放单条 ✕（修订决策 4 / R2-3）**：原裁决「外部行不渲染单条 ✕」的实现前提（服务端只有 list/clear 两 method）已补齐——新增 core `removeExternalOperation(id)`（幂等，id 不存在静默 no-op）与 host-api `external-operations-remove`（body.id string 校验 400；鉴权同 list/clear，零新增特例）。翻案动因：外部失败记录点亮红点却无单条出口，唯一消除手段「清除已结束」附带清空全部终态——红点死锁 + 警报疲劳；且展示层（渠道徽标/按日分组/计数）0.9.79 起已同构，操作层掉队。范围收敛：仅 `failed` 行放行（与面板 ✕ 的问题态集合 input/failed/superseded 语义对齐，done 同样不给）；事务顺序强于 clear（先 api 成功、再动 overlay，失败行保留 + err toast；在途 fetch 窗口由客户端墓碑 `removedIds` 兜住，「清除已结束」时重置）；幂等 no-op；并发纪律与 append 同款读-改-写（Consequences 既有明示局限覆盖本路径）。「清除已结束」行为不变。计划 `docs/plans/2026-10-14-external-ops-single-remove-implementation-plan.md` 经独立评审 Agent 三轮评审（R1-C1..C8、R2-C1..C3）收敛后执行。

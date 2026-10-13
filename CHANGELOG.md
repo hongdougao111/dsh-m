@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.82 功能：外部操作记录 failed 行单条移除——红点死锁解除（ADR-0018 修订）
+
+- **问题（红点死锁 + 操作层与展示层不对齐）**：外部记录（CLI / Agent 工具通道）失败后点亮设置 tab 红点，但外部行没有单条 ✕——0.9.79 的原裁决因服务端只有 list/clear 而不给出 ✕ 出口；唯一消除手段「清除已结束」连带清空全部终态记录（含成功历史），行为上等同永久亮灯，警报疲劳会让红点彻底失效。展示层（渠道徽标、按日分组、计数）0.9.79 起已与本地记录同构，唯独操作层掉队。
+- **方案（服务端 per-id 删除链路 + 客户端分流接线）**：core 新增 `removeExternalOperation(id)`（整文件读-改-写原子替换，幂等——id 不存在静默 no-op，保留记录原样透写不改写历史字段）；host-api 新增 `external-operations-remove` method（body.id string 校验 400，鉴权同 list/clear 零新增特例）；store 新增 `removeExternal(id)`（overlay 剔除 + **墓碑** `removedIds`——拦截在途 fetch 迟到响应把已删行并回，`clearExternal` 重置）；`canRemoveRow` 对外部记录放行 `failed`（done 仍不给 ✕，与面板「问题态才有 ✕」语义精确对齐）；`onOpsRemove` 按渠道分流——本地路径逐字节不变（R0 红线），外部路径**先 api 成功再动 overlay**（事务顺序强于「清除已结束」的 fire-and-forget），失败行保留 + err toast（`op.remove.failed` 新键，{err} 插值带出服务端错误线索，zh/en 同步）。单条 ✕ 无二次确认（与面板一致）。ADR-0018 文末追加修订注记，原裁决原文保留。
+- **验证**：1435 项测试全绿（0.9.80 基线 1425 + 净增 10：journal 存储 3、host-api method 4、store removeExternal+墓碑 2、canRemoveRow 改写与接线锚 2，含一处既有用例标题改写）、typecheck 零错误；实施计划经独立评审 Agent 三轮评审收敛（探针路径/链接期报错形态/墓碑兜底/断言保全/401 惯例/插值链路/回退口径 11 条意见全部闭环）。
+
 ### 0.9.80 修复：已装页开关抖动根治 + 社区开关定位恒定 + 「已实测」徽章退役（三项 UX 修复，client-only）
 
 - **① 已装页开关抖动根治（主人实拍：点开关整页抖、开关原地失踪、鼠标不再命中）**：CDP 实测每次点击开关发生 47px×2 卡片栅格位移 + 0.6–1.3s 命中丢失窗口（原点落到上方卡片 `.dshm-links` 外链行，误触即开浏览器标签）。根因三件：`ProgressLine`（install 专用 pnpm 进度条）对 toggle 也挂载（35px 行 + body 12px gap，插入/拔出即位移）；toast/重启横幅是面板 column flex 的流内子元素（出现/消失压缩 body 39px×2）；开关视觉翻转要等 5 个刷新请求落地（1.5–2.3s「点了没反应」真空期，且期间开关 `locked` 灰态）。修复：新增 `progressTarget`（仅 install/upgrade/self-upgrade 挂进度条；`activeMutateTarget` 语义不动，仍管逐行禁用）；toast/横幅包进 `.dshm-banner-stack`（absolute 底部浮层，pointer-events 穿透）；`pendingToggles` 乐观翻转（点击 42ms 即变，`finally` 摘除＝成功收敛/失败回滚）；toggle 只重取已装视图（installed+market×2+updates+external-operations → installed×1，`view-refresh.js` 未动、单测原样）；`.dshm-switch::before` 热区 34×19 → 46×31（视觉不变）。CDP 回测四断言全过：位移 0、命中零丢失、翻转 42ms、body 底缘 0 位移。
@@ -578,6 +584,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### 0.9.82 Feature — per-row dismiss for failed external operation records: the red-dot deadlock is broken (ADR-0018 revision)
+
+- **Problem (red-dot deadlock + ops layer lagging behind the display layer)**: a failed external record (CLI / agent-tool channel) lights the settings-tab red dot but had no per-row dismiss — the 0.9.79 ruling withheld the ✕ because the server only exposed list/clear. The only way to clear the dot, "Clear ended", also wipes every finished record (successful history included) — behaviorally a permanent alert, and alert fatigue defeats the dot entirely. The display layer (channel badge, day grouping, counts) has been isomorphic with local records since 0.9.79; only the operations layer lagged.
+- **Fix (server per-id delete chain + client channel branching)**: core gains `removeExternalOperation(id)` (whole-file read-modify-write atomic replace, idempotent — silent no-op for missing ids, surviving records written back verbatim); host-api gains the `external-operations-remove` method (body.id string-validated with 400, auth identical to list/clear — zero new special cases); the store gains `removeExternal(id)` (overlay removal + a **tombstone** set `removedIds` that intercepts in-flight fetch responses from re-adding just-deleted rows, reset by `clearExternal`); `canRemoveRow` lets external `failed` rows through (done still has no ✕, precisely matching the panel's problem-status-only rule); `onOpsRemove` branches by channel — the local path is byte-for-byte unchanged (R0 red line), the external path **awaits the server delete before touching the overlay**, and on failure keeps the row and toasts with the new `op.remove.failed` key ({err} interpolation carries the server error, zh/en). No confirmation dialog (same as the panel ✕). ADR-0018 gains a revision note; the original ruling text is preserved.
+- **Verification**: 1435 tests green (0.9.80 baseline 1425 + 10 net new: journal storage 3, host-api method 4, store removeExternal+tombstone 2, canRemoveRow rewrite and wiring anchors 2, incl. one retitled existing case), typecheck clean; the implementation plan converged through three independent review-agent rounds (probe path / link-time error shape / tombstone backstop / assertion preservation / 401 convention / interpolation chain / rollback stance — 11 findings all closed).
 
 ### Fixes in 0.9.80 — installed-tab toggle jitter eliminated + community switch pinned to its title row + 已实测 badge retired (three UX fixes, client-only)
 
