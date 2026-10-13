@@ -113,19 +113,21 @@ export function opRowVm(r) {
     dir: isToggle && typeof meta.on === 'boolean' ? (meta.on ? 'on' : 'off') : null,
     version,
     target: typeof rec.target === 'string' ? rec.target : '',
-    // 外部记录渠道标记（0.9.79 ADR-0018）：非空 = 渠道徽标渲染 + 无单条 ✕ 出口
+    // 外部记录渠道标记（0.9.79 ADR-0018）：非空 = 渠道徽标渲染 + 单条移除出口判定
+    // （0.9.82 修订 R2-3：failed 放行，见 canRemoveRow）
     channel: typeof rec.channel === 'string' && rec.channel !== '' ? rec.channel : null,
   }
 }
 
 /**
- * 单条移除出口判定（0.9.79 R3-1 下沉 + R2-3）：本地记录维持 input/failed/superseded 出口；
- * 外部记录（channel 非空）一律不给单条 ✕——服务端为唯一事实源，✕ 移除后下次 fetch 会按 id
- * 复活；外部行的移除出口仅「清除已结束」（连带 external-operations-clear）。
+ * 单条移除出口判定（0.9.79 R3-1 下沉；0.9.82 修订 R2-3）：本地记录维持 input/failed/superseded
+ * 出口；外部记录 failed 放行（服务端 per-id delete 已建：external-operations-remove，事务顺序
+ * 先 api 成功再动 overlay）——done 不给 ✕，与本地 done 无 ✕ 对齐；外部记录经 externalToRecord
+ * 只产生 done/failed 终态，input/superseded 分支仅为防御。
  */
 export function canRemoveRow(r) {
   if (!r || typeof r !== 'object') return false
-  if (r.channel) return false
+  if (r.channel) return r.status === 'failed'
   return r.status === 'input' || r.status === 'failed' || r.status === 'superseded'
 }
 

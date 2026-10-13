@@ -44,7 +44,7 @@ const ZH = {
   "modal.verified": "实测版本", "modal.tags": "标签", "modal.replacement": "已弃用 · 替代", "modal.installcmd": "安装命令", "modal.copy": "复制", "modal.copied": "已复制",
   "modal.audience.label": "受众", "modal.audience.value": "作者自用（不面向大众推广）", "modal.decoupled.label": "适配", "modal.decoupled.value": "版本无关（DSH 升级无需跟随适配）",
   "op.clear": "清除已结束", "op.clear.none": "没有可清除的已结束记录",
-  "op.superseded.note": "{target} 已跳过（前提已不成立或已手动处理）", "op.cancelled": "用户放弃确认", "op.remove": "移除记录", "op.panel.jump": "查看操作记录",
+  "op.superseded.note": "{target} 已跳过（前提已不成立或已手动处理）", "op.cancelled": "用户放弃确认", "op.remove": "移除记录", "op.remove.failed": "记录移除失败：{err}", "op.panel.jump": "查看操作记录",
   "op.kind.install": "安装", "op.kind.upgrade": "升级", "op.kind.uninstall": "卸载", "op.kind.toggle": "开关",
   "op.kind.community-toggle": "社区目录开关", "op.kind.registry-url": "清单源变更",
   "op.kind.self-upgrade": "自升级", "op.kind.desktop-install": "桌面安装", "op.kind.desktop-uninstall": "桌面卸载", "op.kind.desktop-upgrade": "桌面升级", "op.kind.desktop-toggle": "桌面开关",
@@ -165,7 +165,7 @@ const EN = {
   "modal.verified": "Verified runtimes", "modal.tags": "Tags", "modal.replacement": "Deprecated · replacement", "modal.installcmd": "Install command", "modal.copy": "Copy", "modal.copied": "Copied",
   "modal.audience.label": "Audience", "modal.audience.value": "Author's own (not for general promotion)", "modal.decoupled.label": "Compat", "modal.decoupled.value": "Version-independent (no per-release adaptation)",
   "op.clear": "Clear ended", "op.clear.none": "Nothing finished to clear",
-  "op.superseded.note": "{target} skipped (precondition gone or already handled)", "op.cancelled": "user cancelled", "op.remove": "Dismiss", "op.panel.jump": "Open operations card",
+  "op.superseded.note": "{target} skipped (precondition gone or already handled)", "op.cancelled": "user cancelled", "op.remove": "Dismiss", "op.remove.failed": "Failed to dismiss record: {err}", "op.panel.jump": "Open operations card",
   "op.kind.install": "Install", "op.kind.upgrade": "Upgrade", "op.kind.uninstall": "Uninstall", "op.kind.toggle": "Toggle",
   "op.kind.community-toggle": "Community catalog toggle", "op.kind.registry-url": "Registry source change",
   "op.kind.self-upgrade": "Self-upgrade", "op.kind.desktop-install": "Desktop install", "op.kind.desktop-uninstall": "Desktop uninstall", "op.kind.desktop-upgrade": "Desktop upgrade", "op.kind.desktop-toggle": "Desktop toggle",
@@ -3188,11 +3188,11 @@ function OperationsCard({ records, onClearFinished, onRemove }) {
       r.status === "running" ? Spin() : null,
       r.error ? h("span", { className: "dsvm-opnote" }, r.error) : null,
       r.warning ? h("span", { className: "dsvm-opnote" }, r.warning) : null,
-      // 单条移除（终审·新伤2 → 0.9.79 R3-1/R2-3）：出口判定下沉 canRemoveRow——
-      // 本地 input/failed/superseded 保留 ✕；外部记录（channel 非空）不给单条 ✕（防按 id 复活），
-      // 移除出口仅「清除已结束」。
+      // 单条移除（终审·新伤2 → 0.9.79 R3-1/R2-3 → 0.9.82 修订 R2-3）：出口判定下沉 canRemoveRow——
+      // 本地 input/failed/superseded 保留 ✕；外部记录 failed 放行（服务端 per-id delete 已建），
+      // done 仍不给 ✕。onRemove 收整行 record，onOpsRemove 按 channel 分流（本地 remove / 外部 api）。
       canRemoveRow(r) && onRemove
-        ? h("button", { className: "dshm-xbtn", title: lookup("op.remove"), onClick: () => onRemove(r.id) }, h(XIcon))
+        ? h("button", { className: "dshm-xbtn", title: lookup("op.remove"), onClick: () => onRemove(r) }, h(XIcon))
         : null,
     );
   };
@@ -3863,9 +3863,23 @@ function MarketPanel({ onClose }) {
             // 服务端连带清除（ADR-0018）：失败静默——服务端仍是唯一事实源，下次 fetch 幂等并回
             void api("external-operations-clear").catch(() => {});
           },
-          onOpsRemove: (id) => {
-            opsStore.remove(id);
-            syncOps();
+          onOpsRemove: (rec) => {
+            if (rec && rec.channel) {
+              // 0.9.82 修订 R2-3：外部记录 ✕ = 服务端 per-id 删除；成功才动 overlay（强于 clear 的
+              // fire-and-forget）；复活由 store 墓碑拦住（clearExternal 重置）；失败行保留 + toast
+              // （0.9.6 反无声 no-op 裁决）
+              api("external-operations-remove", { id: rec.id })
+                .then(() => {
+                  opsStore.removeExternal(rec.id);
+                  syncOps();
+                })
+                .catch((err) => {
+                  notify({ kind: "err", text: lookup("op.remove.failed", { err: (err && err.message) || "unknown" }) });
+                });
+            } else {
+              opsStore.remove(rec.id); // 面板本地路径：现状逐字节不动（R0 红线）
+              syncOps();
+            }
           },
         }) : null,
         // 操作记录已整体搬迁至设置 tab 末位通宽卡（0.9.x 布局重构·第二批）：底部不再常驻

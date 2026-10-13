@@ -203,14 +203,24 @@ describe('外部记录 × 视图模型（渠道徽标/单条移除出口/按日�
     assert.equal(opRowVm({ ...base, kind: 'upgrade', status: 'done', channel: 'cli', meta: { from: '1.0.0', to: '2.0.0' } }).version, 'v1.0.0→v2.0.0')
   })
 
-  it('⑥canRemoveRow：channel 非空一律 false（R2-3）；本地记录维持 input/failed/superseded 出口', () => {
+  it('⑥canRemoveRow：本地问题态出口 + 外部 failed 放行（0.9.82 修订 R2-3）', () => {
     const base = { id: 'r', createdAt: 1 }
+    // 本地路径不变（R0 红线）：input/failed/superseded 保留 ✕
     for (const status of ['input', 'failed', 'superseded']) {
       assert.equal(canRemoveRow({ ...base, status }), true, `本地 ${status} 保留单条 ✕`)
-      assert.equal(canRemoveRow({ ...base, status, channel: 'cli' }), false, `外部 ${status} 不给单条 ✕`)
     }
+    // 本地 queued/running/done/warned 无 ✕（R0/R5 回归锚，原样保留）
     for (const status of ['queued', 'running', 'done', 'warned']) {
       assert.equal(canRemoveRow({ ...base, status }), false)
+    }
+    // 外部记录：仅 failed 放行（0.9.82 修订）；done 不给 ✕（与面板 done 对齐）
+    assert.equal(canRemoveRow({ ...base, status: 'failed', channel: 'cli' }), true, '外部 failed 给单条 ✕（服务端 per-id delete 已建）')
+    assert.equal(canRemoveRow({ ...base, status: 'done', channel: 'host-tool' }), false, '外部 done 不给 ✕')
+    // 防御断言：外部记录实际不产生 input/superseded（externalToRecord 只映射 done/failed），仍不给 ✕
+    assert.equal(canRemoveRow({ ...base, status: 'input', channel: 'cli' }), false)
+    assert.equal(canRemoveRow({ ...base, status: 'superseded', channel: 'host-tool' }), false)
+    // 负向断言原样保留：外部 queued/running/warned → false
+    for (const status of ['queued', 'running', 'warned']) {
       assert.equal(canRemoveRow({ ...base, status, channel: 'host-tool' }), false)
     }
     assert.equal(canRemoveRow(null), false, '非法输入安全')
@@ -247,6 +257,14 @@ describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
   it('⑥单条 ✕ 出口改走 canRemoveRow（内联判定退役）', () => {
     assert.ok(src.includes('canRemoveRow(r)'), '行渲染必须消费 canRemoveRow')
     assert.equal(src.includes('r.status === "input" || r.status === "failed" || r.status === "superseded"'), false, 'main.jsx 内联可移除判定退役（R3-1 下沉 operations-view）')
+  })
+  it('⑦外部 failed 行单条 ✕ 接线锚（0.9.82 修订 R2-3）', () => {
+    assert.ok(src.includes('api("external-operations-remove"'), '服务端 per-id 删除 method 调用')
+    assert.ok(src.includes('removeExternal('), 'overlay 按 id 剔除（墓碑拦在途 fetch 复活）')
+    assert.ok(src.includes('"op.remove.failed"'), '失败 toast i18n 键（{err} 插值）')
+    assert.ok(src.includes('onRemove(r)'), '行渲染传整行 record（onOpsRemove 按 channel 分流）')
+    const view = readFileSync(join(root, 'src/client/operations-view.js'), 'utf8')
+    assert.ok(view.includes("return r.status === 'failed'"), 'canRemoveRow 外部 failed 放行')
   })
   it('②清除联动 external-operations-clear；fetch 时机三处（R1-6）；persist 纯净', () => {
     assert.ok(src.includes('api("external-operations")'), '读取 method')
