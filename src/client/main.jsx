@@ -3930,8 +3930,28 @@ function MarketIcon() {
   );
 }
 
+// ---------- 壳接管哨兵（2026-10-13 ds-bot 视图页脚整行让位） ----------
+// sidebar.workspaces 座位属于占领者（ui-sidebar 官方注释："the foot is the
+// sidebar.workspaces registrant's"）：官方工作区树以缺省 priority 0 注册
+// （ui-workspace），负 priority 占位者即"换壳"插件（ds-bot 以 -10 接管其
+// 原生 bot 侧栏）。哨兵为真 = 当前页脚是壳插件的原生界面，市场入口整行
+// 让位；为假 = 官方 harness 页脚，照常在场。故意做成无 hook 的渲染期同步
+// 读：SidebarRoot 本身订阅 sidebar.workspaces（它渲染那个槽），壳接管翻转
+// 必然级联重渲染页脚并重读此处。耦合点是官方槽位契约（sidebar.workspaces
+// 的声明与台账），不是 ds-bot 内部实现。
+let dshmSlotsRef = null;
+const shellTakeover = () => {
+  try {
+    return ((dshmSlotsRef && dshmSlotsRef.entries ? dshmSlotsRef.entries("sidebar.workspaces") : []) || [])
+      .some((entry) => (entry.options.priority ?? 0) < 0);
+  } catch {
+    return false;
+  }
+};
+
 function MarketEntry(props) {
   useEffect(() => ensureCss(), []);
+  if (shellTakeover()) return null;
   const rail = !(props && props.wide);
   return h(
     "button",
@@ -3953,11 +3973,27 @@ function MarketEntry(props) {
 
 // ---------- 工具卡片视图（tool.call.toolview slots） ----------
 // props 契约移植自 skillhub：payload 从 props 中寻找含 items 数组的节点；args 读 block.call.argsRaw。
+// ---------- 注册兼容层（2026-10-13 ds-bot single-slot 事故的 dsh-m 侧防线） ----------
+// single/keyed/list 槽位在「同区分键 + 同 priority」重复注册时，register() 会在
+// apply 同步栈内直接抛错，打挂整个插件激活（cordis fiber state=3）。dsh-m 的注册
+// 面全是自命名空间（id=dshm-market、key=dshm_*），正常不会撞；这层防线保证万一
+// 被占位时降级为告警 + 空释放器——市场面板等其余功能继续存活，而不是整插件熄灭。
+function safeRegister(slots, options, component) {
+  const label = `${options.name}${options.key != null ? `:${options.key}` : options.id != null ? `#${options.id}` : ""}`;
+  try {
+    return slots.register(options, component);
+  } catch (error) {
+    if (!/already has a registration|already has an entry/.test(String((error && error.message) || error))) throw error;
+    console.warn(`[dsh-m] slot "${label}" is contested; dsh-m yields it and keeps running`, error);
+    return () => {};
+  }
+}
+
 function registerSlot(slots, options, component) {
   const next = { ...options };
   if (next.id == null && next.key != null) next.id = String(next.key);
   if (next.key == null && next.id != null) next.key = next.id;
-  return slots.register(next, component);
+  return safeRegister(slots, next, component);
 }
 
 
@@ -4085,6 +4121,7 @@ const inject = ["slots"];
 function apply(ctx) {
   const slots = ctx.slots;
   if (!slots) return;
+  dshmSlotsRef = slots;
   ctx.effect(() => ensureCss(), "dshm-style");
   // 双语：向宿主注册 locale 字典（侧栏 label 随系统语言切换）
   ctx.inject(["locale"], (c) => {
@@ -4098,7 +4135,13 @@ function apply(ctx) {
     }, "dshm-locale");
   });
   slots.inject("sidebar.footer.action", () =>
-    slots.register(
+    safeRegister(
+      slots,
+      // 页脚 order 维持正数工具位（9）：bot 视图的让位由壳接管哨兵负责（该视图
+      // 下 MarketEntry 整行不渲染），order 只影响官方 harness 页脚的排序——那里
+      // DS Bot 入口（-200）应在本工具行之上。2026-10-13 曾试装深负 order
+      // （-400/-500）让 ds-bot 集群贴底，哨兵上线后该做法只剩 harness 视图副作用
+      // （DS Bot 入口沉底），已回撤（裁定：哨兵管让位，order 管排序，各司其职）。
       { name: "sidebar.footer.action", id: "dshm-market", key: "dshm-market", order: 9, locale: "dshm", label: () => lookup("market.title") },
       function DshmMarketEntry(actionProps) {
         return h(MarketEntry, actionProps);
