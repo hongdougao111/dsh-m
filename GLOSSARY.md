@@ -29,6 +29,14 @@ _Avoid_: 错误码映射、pnpm 错误（指原始报错文本时除外）
 事务为兑现「要么提交，要么恢复到有记录、可解释的一致终态」所做的某一步收敛动作的记录，由机器可断言的 code 与给人看的 note 组成。
 _Avoid_: 修复步骤、heal note（note 只是其中一半）
 
+**外部通道（External Channel）**:
+非面板 API 的 Profile 变更发起通道：`dshm` CLI 与宿主工具（host tools）。面板 API 的变更不属于外部通道，两类通道共用同一批 core 变更入口。
+_Avoid_: CLI 通道（以偏概全——宿主工具也是外部通道）、远程通道（与机器边界无关）
+
+**外部操作记录（External Operation Record）**:
+外部通道发起的 Profile 变更的终态事实记录，由变更发生的那台机器独立落盘（机器本地，不跨机同步）；只记通道、对象、版本迁移、时间与结果，不含凭据。与面板操作记录（浏览器 localStorage 的操作泵）相互独立：不入操作泵、不参与恢复重放；面板「已结束」列表以渠道徽标并读两类记录。
+_Avoid_: 操作日志（泛指）、审计日志（暗示服务端集中式或跨机聚合）、同步记录
+
 **settings 兼容层（Settings Compat）**:
 host 对 DSH settings 服务双代形态的运行时探测与统一接线：≤0.1.5 走 `register()` scope（get/update/watch），0.1.7-rc.1/rc.2 走 Config `.volatile()` 字段 + `settings.update(ns)` + `loader/volatile-update` 事件；形态不识别降级 cordis 配置文件通路。controller 只消费 plain 值，出站一律解包 Volatile 引用；设置集成失败只降级，不拖垮 tools / webServer。
 _Avoid_: 版本号分支（按 API 形态探测，不判 DSH 版本）、设置注册（旧 API 时代用语）
