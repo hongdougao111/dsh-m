@@ -300,7 +300,7 @@ function communityLabels(data) {
 // ---------- 样式（跟随 DSH Web 主题变量，深浅色自适应） ----------
 const CSS = `
 .dshm-overlay{position:fixed;inset:0;z-index:2147483000;background:var(--dsw-alias-bg-mask-3,rgba(15,23,42,.48));display:flex;align-items:center;justify-content:center;padding:max(24px,var(--dsh-windows-titlebar-height,0px)) 16px 24px;box-sizing:border-box}
-.dshm-panel{width:min(920px,100%);height:min(680px,86vh);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-bg-base,#fff));background:color-mix(in srgb,var(--dsw-alias-bg-base,#fff) 86%,transparent);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(2,6,23,.25);overflow:hidden;font-family:inherit;color:var(--dsw-alias-label-primary,inherit)}
+.dshm-panel{position:relative;width:min(920px,100%);height:min(680px,86vh);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-bg-base,#fff));background:color-mix(in srgb,var(--dsw-alias-bg-base,#fff) 86%,transparent);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(2,6,23,.25);overflow:hidden;font-family:inherit;color:var(--dsw-alias-label-primary,inherit)}
 /* 0.9.70 还原态拖拽：.abs = 有位置记忆时的绝对定位形态（overlay 为 inset:0 fixed，
    绝对定位坐标即视口坐标）；无记录时面板仍走 overlay flex 居中，渲染路径与旧版逐字节一致。
    拖拽观感不变量（0.9.70 修订，ADR-0017 v2）：拖拽态与静止态同玻璃同 blur，外观逐像素一致
@@ -553,6 +553,8 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-sub{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dsw-alias-label-caption,#6b7280)}
 .dshm-detail{margin-top:8px;border-top:1px dashed var(--dsw-alias-border-l2,#e5e7eb);padding-top:8px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary,#4b5563)}
 .dshm-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.dshm-banner-stack{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;flex-direction:column;pointer-events:none}
+.dshm-banner-stack .dshm-banner{pointer-events:auto}
 .dshm-banner{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-state-warn-tertiary,#fffbeb);color:var(--dsw-alias-state-warn-primary,#b45309);font-size:12px}
 .dshm-banner.err{background:rgba(239,68,68,.13);color:var(--dsw-alias-state-error-primary,#b91c1c)}
 /* 0.9.72 同款滚轮治理（见 dshm-ops-scroll 注）：横幅文本不满 140px 时不得吞滚轮 */
@@ -650,6 +652,9 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
 .dshm-dot.idle{color:#9ca3af}
 .dshm-dot.busy{color:#f59e0b}
 .dshm-switch{position:relative;display:inline-flex;align-items:center;width:34px;height:19px;border-radius:10px;background:var(--dsw-alias-fill-secondary,#d1d5db);cursor:pointer;transition:background .15s;flex:none;margin-left:auto}
+/* 热区扩展（2026-10-13 UX 修复）：视觉 34×19 不变，可点面积经伪元素扩到 46×31——
+   小目标 + 整卡大目标相邻的误触半径收敛；开关距卡边 12px，-6px 外溢不越出自身卡片 */
+.dshm-switch::before{content:"";position:absolute;inset:-6px;border-radius:14px}
 .dshm-switch input{display:none}
 .dshm-switch.on{background:#22c55e}
 .dshm-switch.locked{opacity:.45;cursor:not-allowed}
@@ -2403,10 +2408,20 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
   const updateRows = updates && updates.data && Array.isArray(updates.data.updates) ? updates.data.updates : [];
   const [openPkg, setOpenPkg] = useState(null);
   const [readmePkg, setReadmePkg] = useState(null);
+  // 乐观开关（2026-10-13 UX 修复）：点击瞬间本地记录 {pkg → enabled}，开关立即翻转；
+  // set-enabled 返回并重取已装数据后在 finally 清除（服务端态已收敛，无闪烁）；
+  // 失败路径同样在 finally 清除＝回滚到服务端态，配合 err toast。PhaseDot/副行文案一并跟随。
+  const [pendingToggles, setPendingToggles] = useState({});
   // busy 派生自操作记录（0.7.0 Task 13）——首个进行中的非 install 操作
   const activeMutateTarget = (ops.records.find((r) => r.kind !== "install" && (r.status === "running" || r.status === "queued" || r.status === "input")) || {}).target || null;
+  // 进度条只服务有 pnpm 阶段的操作（install/upgrade/self-upgrade）。toggle/uninstall 挂它只会
+  // 显示无信息量的「· 准备中」，还要付出 47px×2 的卡片栅格位移——开关原地丢失命中 0.6–1.3s
+  // （2026-10-13 CDP 实测，01_docs/research/2026-10-13-dshm-toggle-ux-cdp-probe.md）。
+  // 注意别合并进 activeMutateTarget：后者还负责逐行禁用按钮（含 toggle 自身）。
+  const progressTarget = (ops.records.find((r) => (r.kind === "install" || r.kind === "upgrade" || r.kind === "self-upgrade") && (r.status === "running" || r.status === "queued" || r.status === "input")) || {}).target || null;
 
   const doToggle = async (it, enabled) => {
+    setPendingToggles((m) => ({ ...m, [it.pkg]: enabled }));
     const call = () => api("set-enabled", { pkg: it.pkg, enabled });
     try {
       let res;
@@ -2421,13 +2436,22 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
       const note = toggleNoticeKeys(res);
       const extra = (res.warnings && res.warnings.length ? `（${res.warnings.join("；")}）` : "");
       notify({ kind: "ok", needsRestart: note.needsRestart, text: lookup(note.textKey, note.params) + extra });
-      await (onMutation ? onMutation() : reload());
+      // toggle 只重取已装视图：开关不改变 installed-ness 与版本，市场×2/updates 无需跟随
+      // （原 refreshViews 五连请求 → 1 个；渲染churn 同步下降，不稳定窗口缩短）
+      await reload();
     } catch (e) {
       if (e && e.opSuperseded) {
         notify({ kind: "ok", text: lookup("op.superseded.note", { target: it.pkg }) });
       } else {
         notify({ kind: "err", text: lookup("toggle.failed", { err: (e && e.message) || e }) });
       }
+    } finally {
+      // 成功＝服务端数据已收敛后摘除乐观覆盖；失败＝直接回滚到服务端态
+      setPendingToggles((m) => {
+        if (!(it.pkg in m)) return m;
+        const { [it.pkg]: _drop, ...rest } = m;
+        return rest;
+      });
     }
   };
 
@@ -2522,13 +2546,18 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
           ),
         )
       : null,
-    activeMutateTarget ? h(ProgressLine, { key: "prog" }) : null,
+    progressTarget ? h(ProgressLine, { key: "prog" }) : null,
     h(
       "div",
       { className: "dshm-cards" },
       items.map((it) => {
         const vm = installedViewModel(it);
-        const tvm = toggleViewModel(it);
+        const pendingOn = pendingToggles[it.pkg];
+        const tvm0 = toggleViewModel(it);
+        // 乐观翻转覆盖开关视觉；停用时相位点按不变量清空（enabled===false → 相位 null）
+        const tvm = pendingOn === undefined
+          ? tvm0
+          : { ...tvm0, switchOn: pendingOn, ...(pendingOn === false ? { phaseDotClass: "", phaseLabelKey: null } : {}) };
         return Card({
           key: it.pkg,
           icon: h(Icon, { entry: { name: it.name, github: vm.githubRepo, icon: null } }),
@@ -2549,7 +2578,9 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
           desc: it.description || "（无描述）",
           sub: [
             h(PhaseDot, { key: "dot", vm: tvm }),
-            vm.phaseKey ? lookup(vm.phaseKey) : lookup(vm.enabledLabelKey),
+            pendingOn === undefined
+              ? (vm.phaseKey ? lookup(vm.phaseKey) : lookup(vm.enabledLabelKey))
+              : lookup(pendingOn ? "toggle.state.on" : "toggle.state.off"),
             `v${it.version || "?"}`,
             vm.sourceLabelKey ? lookup(vm.sourceLabelKey) : it.source,
             vm.latestIssue ? lookup("installed.check.incomplete") : null,
@@ -3829,11 +3860,20 @@ function MarketPanel({ onClose }) {
         }) : null,
         // 操作记录已整体搬迁至设置 tab 末位通宽卡（0.9.x 布局重构·第二批）：底部不再常驻
       ),
-      toast
-        ? h("div", { className: toast.kind === "err" ? "dshm-banner err" : "dshm-banner" },
-            h("span", { className: `dshm-banner-text${toastScrollCls}`, ref: toastTextRef }, toast.text))
-        : null,
-      banner ? h(RestartBanner, { note: banner.text, onDone: () => setBanner(null), desktop: banner.desktop === true, onRestarted: reloadPing }) : null,
+        // toast/横幅 overlay 化（2026-10-13 UX 修复）：原先是面板 column flex 的流内子元素，
+        // 出现/消失会压缩 body(flex:1) 造成二次抖动；现挂 absolute 底部浮层（.dshm-banner-stack），
+        // 零布局参与。stack 用 pointer-events:none 放行下层点击，banner 自身恢复 auto。
+        toast || banner
+          ? h(
+              "div",
+              { className: "dshm-banner-stack" },
+              toast
+                ? h("div", { className: toast.kind === "err" ? "dshm-banner err" : "dshm-banner" },
+                    h("span", { className: `dshm-banner-text${toastScrollCls}`, ref: toastTextRef }, toast.text))
+                : null,
+              banner ? h(RestartBanner, { note: banner.text, onDone: () => setBanner(null), desktop: banner.desktop === true, onRestarted: reloadPing }) : null,
+            )
+          : null,
     ),
   );
 }
