@@ -566,4 +566,30 @@ describe('createOperationsStore × 外部记录 overlay（Task 5）', () => {
     assert.equal(store.list().length, 0, 'list() 不含外部记录（泵/restore 只看本地）')
     assert.equal(store.listMerged().length, 1, 'listMerged() 并读两类')
   })
+
+  it('⑤removeExternal 按 id 剔除 overlay：本地记录原样、不存在 id 静默 no-op（0.9.82 修订 R2-3）', () => {
+    const store = createOperationsStore(memStorage())
+    store.upsert(rec({ id: 'local-1', status: 'done' }))
+    store.setExternal([ext({ id: 'ext-a', at: 1_000 }), ext({ id: 'ext-b', at: 2_000 })])
+    const merged = store.removeExternal('ext-a')
+    assert.equal(merged.some((r) => r.id === 'ext-a'), false, '被删行不在合并视图')
+    assert.equal(merged.some((r) => r.id === 'local-1'), true, '本地记录不受影响')
+    assert.deepEqual(store.externalList().map((r) => r.id), ['ext-b'])
+    // 不存在 id：不抛、视图不变
+    const again = store.removeExternal('not-exist')
+    assert.deepEqual(again.map((r) => r.id), merged.map((r) => r.id))
+  })
+
+  it('⑥墓碑：removeExternal 后迟到 fetch 同 id 不复活；clearExternal 重置墓碑（评审 R1-C3）', () => {
+    const store = createOperationsStore(memStorage())
+    store.setExternal([ext({ id: 'ext-b', at: 1_000 })])
+    store.removeExternal('ext-b')
+    // 模拟在途 fetch 迟到响应：删除前发出的 list 结果晚于删除落地
+    store.setExternal([ext({ id: 'ext-b', at: 1_000 })])
+    assert.equal(store.listMerged().some((r) => r.id === 'ext-b'), false, '墓碑拦住复活')
+    // 「清除已结束」重置墓碑：服务端 journal 已整体清空，此后 fetch 并回的是服务端仍存在的行
+    store.clearExternal()
+    store.setExternal([ext({ id: 'ext-b', at: 1_000 })])
+    assert.equal(store.listMerged().some((r) => r.id === 'ext-b'), true, '重置后不再拦截')
+  })
 })

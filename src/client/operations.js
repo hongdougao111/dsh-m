@@ -131,6 +131,11 @@ export function createOperationsStore(storage) {
   // fetch 后只进内存——绝不写 localStorage（R1-3：否则服务端滚动淘汰/清除后被本地副本复活，
   // 且每浏览器各留一份）。泵/恢复语义只看 records（本地），overlay 零扰动。
   let externalOverlay = []
+  // 墓碑（0.9.82 修订 R2-3，评审 R1-C3）：removeExternal 后（服务端删除已成功）的 id 在本页
+  // 内存记名——拦截在途 fetch 迟到响应把已删记录并回 overlay（setExternal 是只增改的 merge-only
+  // 合并，无墓碑时该行会僵尸存留）。clearExternal（「清除已结束」）重置：重置后能并回的只有
+  // 服务端仍存在的行，已被 ✕ 删除的行服务端已无、不会经 fetch 回来。
+  const removedIds = new Set()
 
   const persist = () => {
     if (persistDegraded) return
@@ -153,13 +158,24 @@ export function createOperationsStore(storage) {
     setExternal(next) {
       const incoming = (Array.isArray(next) ? next : []).filter((r) => r && typeof r === 'object' && typeof r.id === 'string')
       const byId = new Map(externalOverlay.map((r) => [r.id, r]))
-      for (const r of incoming) byId.set(r.id, { ...(byId.get(r.id) || {}), ...r })
+      for (const r of incoming) {
+        if (removedIds.has(r.id)) continue // 0.9.82 墓碑：在途 fetch 迟到响应不复活已删记录
+        byId.set(r.id, { ...(byId.get(r.id) || {}), ...r })
+      }
       externalOverlay = [...byId.values()]
       return this.listMerged()
     },
     /** 清空外部 overlay（「清除已结束」联动 external-operations-clear 成功后调用）。 */
     clearExternal() {
       externalOverlay = []
+      removedIds.clear()
+      return this.listMerged()
+    },
+    /** 按 id 剔除外部 overlay（0.9.82 修订 R2-3）：仅内存视图——调用方必须已在服务端
+     *  删除成功后调用（external-operations-remove）；墓碑拦住在途 fetch 迟到响应的复活。 */
+    removeExternal(id) {
+      removedIds.add(id)
+      externalOverlay = externalOverlay.filter((r) => r.id !== id)
       return this.listMerged()
     },
     /** @returns {OperationRecord[]} 外部 overlay 当前快照（原始形态，浅拷贝）。 */
