@@ -1,6 +1,6 @@
 # 外部通道操作审计：机器本地直落日志 + 与操作泵分离（ADR-0018；v1 = 0.9.79）
 
-dsh-m 的全局操作记录（DESIGN §2.6）长期明示口径 = **面板发起**的变更：「CLI、`dsh plugin add`、DSH 设置表单与配置文件直改不留痕」。这条边界在 Agent 工具成为一等操作入口后失效：quota-watch 0.1.28 经 `dshm_upgrade`（host tool）升级装机成功，市场面板「已结束」列表零记录——操作审计面与真实系统状态脱节，用户无法回看「谁在何时动了 profile」。本卡为非面板通道（`dshm` CLI、Agent 工具）补上终态事实记录，同时**不碰操作泵的七态/重放语义**。设计经 `/grill-with-docs` 收敛（2026-10-13；Q1–Q8 + Q2b + Q5 逐条锁定）；实施计划 `docs/plans/2026-10-13-external-operations-journal-implementation-plan.md` 经独立评审 Agent 三轮对抗评审（R1-1..8、R2-1..4、R3-1，全部「修改并复核通过」）后执行。
+dsh-m 的全局操作记录（DESIGN §2.6）长期明示口径 = **面板发起**的变更：「CLI、`dsh plugin add`、DSH 设置表单与配置文件直改不留痕」。这条边界在 Agent 工具成为一等操作入口后失效：quota-watch 0.1.28 经 `dshm_upgrade`（host tool）升级装机成功，市场面板「已结束」列表零记录——操作审计面与真实系统状态脱节，用户无法回看「谁在何时动了 profile」。本卡为非面板通道（`dshm` CLI、Agent 工具）补上终态事实记录，同时**不碰操作泵的七态/重放语义**。设计经 `/grill-with-docs` 收敛（2026-10-13；Q1–Q8 + Q2b + Q5 逐条锁定）；实施计划 `docs/plans/2026-10-13-external-operations-journal-implementation-plan.md` 经独立评审 Agent 三轮对抗评审（R1-1..R1-8、R2-1..R2-4、R3-1）收敛后执行——计划文本中可追溯的落点标注为 R1-1/R1-2/R1-3/R1-4/R1-6/R1-7/R1-8、R2-2/R2-3/R2-4、R3-1，其余条目为评审过程性收敛、未在计划中单独标注。
 
 ## 决策
 
@@ -20,6 +20,7 @@ dsh-m 的全局操作记录（DESIGN §2.6）长期明示口径 = **面板发起
 
 ## Consequences
 
+- **并发边界（明示局限）**：append 为整文件读-改-写 + tmp+rename——原子性保证「文件不损坏、条目不半写」，但**同机多进程**（CLI 与宿主进程各为独立进程）并发 append 存在丢更新窗口（可能静默丢失一条审计记录；不损坏、不反噬操作终态）。进程内经 mutation session 串行；跨进程串行化（文件锁）不在一期范围，如未来出现实际丢记录事件再评估。
 - **验收门**：全量测试与 0.9.78 基线同绿（无新增失败）；通道单测钉住「panel 零记录 / cli、host-tool 各一条 / desktopToggle 单条 / 失败记 failed / append 失败不反噬」。
 - **行为了解边界**：面板常驻期间他终端的变更不做轮询，fetch 时机 = 面板初始化 + 每次操作完成后 + 打开操作记录卡时（R1-6，一期明示）；「已结束」标题计数改用合并后总数，最近 50 条渲染截断照旧（R1-7）。
 - **GLOSSARY**：「外部通道（External Channel）」「外部操作记录（External Operation Record）」两词条已入档（随本 ADR 同批入库）。
