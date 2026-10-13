@@ -139,6 +139,18 @@ export async function clearExternalOperations(): Promise<void> {
   await atomicWrite(file, '[]\n')
 }
 
+/** 按 id 删除单条外部记录（0.9.82 修订 R2-3）：幂等——id 不存在静默 no-op；
+ *  整文件读-改-写与 append 同款并发纪律（ADR-0018 Consequences 既有明示局限）；
+ *  保留记录原样透写，不做 normalize 重写（删除不改写历史字段）。 */
+export async function removeExternalOperation(id: string): Promise<void> {
+  const file = journalFile()
+  const records = await readAll(file)
+  const kept = records.filter((r) => r.id !== id)
+  if (kept.length === records.length) return
+  await mkdir(dirname(file), { recursive: true })
+  await atomicWrite(file, `${JSON.stringify(kept, null, 2)}\n`)
+}
+
 /** appendExternalOperation 的类型（钩子注入位；R3-1：deps.appendExternalOperation ?? 真实现）。 */
 export type AppendExternalOperation = typeof appendExternalOperation
 

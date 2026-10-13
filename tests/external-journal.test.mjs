@@ -14,6 +14,7 @@ import {
   appendExternalOperation,
   listExternalOperations,
   clearExternalOperations,
+  removeExternalOperation,
   journalFile,
 } from '../lib/core/external-journal.js'
 
@@ -121,5 +122,42 @@ describe('external-journal 存储', () => {
     await appendExternalOperation(rec({ id: 'trunc', result: 'failed', reason: long }))
     const list = await listExternalOperations()
     assert.equal(list[0].reason.length, 300)
+  })
+
+  it('⑨removeExternalOperation 按 id 删除单条，其余保留（0.9.82 修订 R2-3）', async () => {
+    await appendExternalOperation(rec({ id: 'a', at: 1_000 }))
+    await appendExternalOperation(rec({ id: 'b', at: 2_000, result: 'failed', reason: 'boom' }))
+    await removeExternalOperation('a')
+    const list = await listExternalOperations()
+    assert.equal(list.length, 1)
+    assert.equal(list[0].id, 'b')
+    assert.equal(list[0].result, 'failed')
+  })
+
+  it('⑩removeExternalOperation 对不存在的 id 静默 no-op（幂等）', async () => {
+    await appendExternalOperation(rec({ id: 'keep' }))
+    await removeExternalOperation('not-exist')
+    const list = await listExternalOperations()
+    assert.equal(list.length, 1)
+    assert.equal(list[0].id, 'keep')
+  })
+
+  it('⑪删除后重读文件：JSON 可解析、长度减一、保留记录字段逐字段不变（删除不改写历史）', async () => {
+    await appendExternalOperation(rec({ id: 'gone', at: 1_000 }))
+    await appendExternalOperation(
+      rec({ id: 'kept', at: 2_000, channel: 'host-tool', kind: 'toggle', target: 'pkg-x', result: 'failed', reason: 'boom' }),
+    )
+    await removeExternalOperation('gone')
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    assert.equal(raw.length, 1)
+    assert.deepEqual(raw[0], {
+      id: 'kept',
+      at: 2_000,
+      channel: 'host-tool',
+      kind: 'toggle',
+      target: 'pkg-x',
+      result: 'failed',
+      reason: 'boom',
+    })
   })
 })
