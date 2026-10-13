@@ -1,7 +1,8 @@
 /**
  * Task 4（外部操作记录，ADR-0018）：host-api 读取与清除 method 单测——
  * external-operations → {ok:true, records:[...]}；external-operations-clear → {ok:true}；
- * 两 method 沿既有宿主信任检查（panel 会话要求，零新增特例）；overrides 注入位与既有模式同形。
+ * external-operations-remove → {ok:true}（0.9.82 修订 R2-3：外部 failed 行单条 ✕ 的服务端出口）；
+ * 三 method 沿既有宿主信任检查（panel 会话要求，零新增特例）；overrides 注入位与既有模式同形。
  * 驱动方式沿用 host-api.test.mjs：createApiDispatcher + mock req/res，不 mock HTTP 层。
  * 运行：npm run build && node --test tests/host-api-external.test.mjs
  */
@@ -116,5 +117,43 @@ describe('host-api × 外部操作读取/清除（Task 4）', () => {
     assert.deepEqual(list.body.records.map((r) => r.id), ['injected'])
     await callApi(dispatcher, { method: 'external-operations-clear' })
     assert.deepEqual(calls, { list: 1, clear: 1 })
+  })
+})
+
+describe('host-api × 外部单条移除（0.9.82 修订 R2-3）', () => {
+  it('external-operations-remove 按 id 删除且再 list 只剩其余（直通真实现）', async () => {
+    await appendExternalOperation(rec({ id: 'a', at: 1_000 }))
+    await appendExternalOperation(rec({ id: 'b', at: 2_000, channel: 'host-tool', kind: 'install', target: 'x', result: 'failed' }))
+    const removed = await callApi(setup(), { method: 'external-operations-remove', id: 'a' })
+    assert.equal(removed.status, 200)
+    assert.equal(removed.body.ok, true)
+    const list = await callApi(setup(), { method: 'external-operations' })
+    assert.deepEqual(list.body.records.map((r) => r.id), ['b'])
+  })
+
+  it('缺 id 与 id 非字符串 → 400（错误信息含 id）', async () => {
+    const missing = await callApi(setup(), { method: 'external-operations-remove' })
+    assert.equal(missing.status, 400)
+    assert.match(String(missing.body?.error || missing.body || ''), /id/)
+    const nonString = await callApi(setup(), { method: 'external-operations-remove', id: 123 })
+    assert.equal(nonString.status, 400)
+    assert.match(String(nonString.body?.error || nonString.body || ''), /id/)
+  })
+
+  it('overrides 注入位：dispatcher 消费注入的 removeExternalOperation（真实现未被触达）', async () => {
+    const seen = []
+    const dispatcher = setup({
+      removeExternalOperation: async (id) => { seen.push(id) },
+    })
+    const res = await callApi(dispatcher, { method: 'external-operations-remove', id: 'ext-9' })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.ok, true)
+    assert.deepEqual(seen, ['ext-9'])
+  })
+
+  it('external-operations-remove 同样要求面板会话（沿既有宿主信任检查，实现前即应 401）', async () => {
+    const dispatcher = setup({ rejectRequest: () => 401 })
+    const res = await callApi(dispatcher, { method: 'external-operations-remove', id: 'ext-1' })
+    assert.equal(res.status, 401)
   })
 })

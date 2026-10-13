@@ -20,7 +20,7 @@ import {
   InstallGuardError,
 } from './market.js'
 import { runProfileTransaction, TransactionError, makeNpmWarmPackument } from './profile-transaction.js'
-import { listExternalOperations, clearExternalOperations } from './external-journal.js'
+import { listExternalOperations, clearExternalOperations, removeExternalOperation } from './external-journal.js'
 import { readInstalledPluginReadme, type PluginReadme } from './installed.js'
 import { loadPrimaryScreenshots } from './primary-screenshots.js'
 import { isNewerVersion, npmLatest, npmPackumentReadme } from './versions.js'
@@ -90,6 +90,8 @@ export interface HostApiOverrides {
   /** 0.9.79 外部操作记录（ADR-0018）：读取/清除注入位（测试；缺省 = 真实现）。 */
   listExternalOperations?: typeof listExternalOperations
   clearExternalOperations?: typeof clearExternalOperations
+  /** 0.9.82 修订 R2-3：外部 failed 行单条 ✕ 的服务端 per-id 删除注入位（测试；缺省 = 真实现）。 */
+  removeExternalOperation?: typeof removeExternalOperation
 }
 
 export interface HostApiContext {
@@ -300,6 +302,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
     ensureService: ctx.deps?.ensureService,
     listExternalOperations: ctx.deps?.listExternalOperations ?? listExternalOperations,
     clearExternalOperations: ctx.deps?.clearExternalOperations ?? clearExternalOperations,
+    removeExternalOperation: ctx.deps?.removeExternalOperation ?? removeExternalOperation,
   }
   const cfg = (): typeof ctx.controller.config => ctx.controller.config
   // 0.9.0：宿主信任检查委派（含 ping 与未知 method，fail-closed）；
@@ -657,6 +660,14 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
 
         case 'external-operations-clear': {
           await d.clearExternalOperations()
+          payload = {}
+          break
+        }
+
+        case 'external-operations-remove': {
+          // 0.9.82 修订 R2-3：外部 failed 行单条 ✕ 的服务端出口；鉴权同 list/clear（零新增特例）
+          if (typeof body.id !== 'string' || body.id === '') throw new ApiProtocolError(400, '缺少 id')
+          await d.removeExternalOperation(body.id)
           payload = {}
           break
         }
