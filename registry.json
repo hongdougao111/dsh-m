@@ -205,15 +205,15 @@
       "homepage": "https://github.com/meyaomiao/dsh-server-deck"
     },
     {
-      "id": "dsh-flowglass",
-      "name": "DSH Flowglass",
-      "description": "流镜：把当前会话画成三列泳道流程图，展示工具调用、并行分组与子代理分支；可选集成 better-sidebar。",
+      "id": "ds-bot",
+      "name": "DS Bot",
+      "description": "多 Bot 协作：把 DSH 变成常驻 Bot 团队，支持主 Bot、Bot 间消息与群聊。",
       "category": "watchlist",
-      "tags": ["可视化", "流程图", "会话", "界面"],
+      "tags": ["Bot", "群聊", "多 Agent", "协作"],
       "source": "npm",
-      "npm": "dsh-flowglass",
-      "github": "Iwctwbh/dsh-flowglass",
-      "homepage": "https://github.com/Iwctwbh/dsh-flowglass"
+      "npm": "ds-bot",
+      "github": "Fei2411/DeepSeek-Bot",
+      "homepage": "https://github.com/Fei2411/DeepSeek-Bot"
     },
     {
       "id": "dsh-chat-manager",
