@@ -330,12 +330,11 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
     }
   })
 
-  it('U12：精选条目收藏卡恢复身份（精选徽标）与质量徽标（已实测）；受众/解耦不打标（§2.7 裁决⑤，R7）', () => {
+  it('U12：精选条目收藏卡保留身份（精选徽标）；verified 徽标退役（2026-10-13 B 方案）；受众/解耦不打标（§2.7 裁决⑤）', () => {
     const favs = { list: [{ id: 'p', snapshot: { id: 'p', name: 'P', description: 'd', source: 'npm', npm: 'pkg-p', verified: ['0.2.0-rc.2'] }, addedAt: 1 }], toggle: () => {}, removeIds: () => {} }
     const html = renderToString(h(components.__FavoriteZone, { favorites: favs, onOpen: () => {} }))
     assert.ok(html.includes('精选') || html.includes('Curated'), '无 owner 快照 → 精选徽标（R9 双语兜底）')
-    assert.ok(html.includes('title="0.2.0-rc.2"'), 'verified 徽标经 title 属性呈现（语言无关）')
-    assert.ok(html.includes('已实测') || html.includes('Verified'), 'verified 徽标文案（R9 双语兜底）')
+    assert.ok(!html.includes('已实测') && !html.includes('Verified'), 'verified 徽标已退役（卡面只留例外信号，实测信息归详情弹窗）')
     assert.ok(!html.includes('作者自用') && !html.includes("Author's own"), '收藏区不打受众标（R7）')
     assert.ok(!html.includes('版本无关') && !html.includes('Version-independent'), '收藏区不打解耦标（R7）')
   })
@@ -368,6 +367,20 @@ describe('0.9.76「版本无关」徽章退役（源码断言）——展示层�
     assert.ok(src.includes('modal.decoupled.label') && src.includes('modal.decoupled.value'), 'Compat 行 i18n 键在')
     assert.match(src, /it\.decoupled === true \? kv\(lookup\("modal\.decoupled\.label"\)/, 'Compat 行条件渲染在')
     assert.match(src, /"verified", "audience", "decoupled"\]/, 'snapshotOf 数据字段保留')
+  })
+})
+
+describe('2026-10-13「已实测」徽章退役（B 方案）——卡面徽章三处退役、byline 灰字承接、Modal 实测版本行为唯一权威呈现', () => {
+  it('市场卡/收藏卡/Modal 头徽章渲染调用与 i18n 键退役；badges 应标记例外而非常态', () => {
+    assert.equal(src.includes('lookup("badge.verified")'), false, '徽章渲染调用不得残留')
+    assert.equal(src.includes('"badge.verified"'), false, 'i18n 徽章键不得残留（ZH/EN 均退役）')
+  })
+  it('byline 灰字承接（低显著度，末位=最新复验版本）；Modal「实测版本」行保留为唯一权威呈现', () => {
+    assert.match(src, /const verifiedByline = \(it\) =>/, 'byline 灰字构造器在')
+    assert.match(src, /verifiedByline\(it\),/, '市场卡 byline 接线在')
+    assert.match(src, /lookup\("byline\.verified", \{ v: it\.verified\[it\.verified\.length - 1\] \}\), title: it\.verified\.join\("、"\)/, '灰字取末位（时间序最新）+ tooltip 全量清单')
+    assert.equal(src.split('"byline.verified":').length - 1, 2, 'byline.verified ZH/EN 各一次（键定义计口径，带冒号）')
+    assert.match(src, /it\.community !== true && Array\.isArray\(it\.verified\) && it\.verified\.length \? kv\(lookup\("modal\.verified"\)/, 'Modal「实测版本」行条件渲染在（唯一权威呈现）')
   })
 })
 

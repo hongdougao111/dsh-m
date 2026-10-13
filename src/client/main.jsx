@@ -38,7 +38,8 @@ const ZH = {
   "tab.market": "市场", "tab.installed": "已装", "tab.settings": "设置",
   "cat.all": "全部", "cat.essentials": "装机必备", "cat.cui-picks": "崔添翼精选", "cat.self-dev": "iasi自研", "cat.tencent-lighthouse": "腾讯轻量云专区", "cat.watchlist": "观察区",
   "zone.community": "社区", "zone.primary": "精选", "zone.favorites": "收藏",
-  "badge.deprecated": "已弃用", "sub.snapshot": "v{v}（目录快照）", "badge.verified": "已实测", "badge.internal": "作者自用",
+  "badge.deprecated": "已弃用", "sub.snapshot": "v{v}（目录快照）", "badge.internal": "作者自用",
+  "byline.verified": "实测 ≤{v}",
   "modal.category": "分类", "modal.added": "收录日期", "modal.dlwindow": "下载量（30 天窗口）", "modal.checkedat": "核对于", "modal.dlnone": "无窗口数据",
   "modal.verified": "实测版本", "modal.tags": "标签", "modal.replacement": "已弃用 · 替代", "modal.installcmd": "安装命令", "modal.copy": "复制", "modal.copied": "已复制",
   "modal.audience.label": "受众", "modal.audience.value": "作者自用（不面向大众推广）", "modal.decoupled.label": "适配", "modal.decoupled.value": "版本无关（DSH 升级无需跟随适配）",
@@ -158,7 +159,8 @@ const EN = {
   "tab.market": "Market", "tab.installed": "Installed", "tab.settings": "Settings",
   "cat.all": "All", "cat.essentials": "Essentials", "cat.cui-picks": "Cui Picks", "cat.self-dev": "iasi Self-dev", "cat.tencent-lighthouse": "Tencent Lighthouse", "cat.watchlist": "Watchlist",
   "zone.community": "Community", "zone.primary": "Curated", "zone.favorites": "Favorites",
-  "badge.deprecated": "Deprecated", "sub.snapshot": "v{v} (catalog snapshot)", "badge.verified": "Verified", "badge.internal": "Author's own",
+  "badge.deprecated": "Deprecated", "sub.snapshot": "v{v} (catalog snapshot)", "badge.internal": "Author's own",
+  "byline.verified": "verified ≤{v}",
   "modal.category": "Category", "modal.added": "Added", "modal.dlwindow": "Downloads (30-day window)", "modal.checkedat": "checked at", "modal.dlnone": "No window data",
   "modal.verified": "Verified runtimes", "modal.tags": "Tags", "modal.replacement": "Deprecated · replacement", "modal.installcmd": "Install command", "modal.copy": "Copy", "modal.copied": "Copied",
   "modal.audience.label": "Audience", "modal.audience.value": "Author's own (not for general promotion)", "modal.decoupled.label": "Compat", "modal.decoupled.value": "Version-independent (no per-release adaptation)",
@@ -1669,7 +1671,6 @@ function DetailModal({ it, labels, busy, onClose, onInstall, onUpgrade, upgradeB
         h(Icon, { entry: it }),
         h("span", { className: "dshm-name" }, it.name),
         it.deprecated === true ? h("span", { className: "dshm-badge warn" }, lookup("badge.deprecated")) : null,
-        it.community !== true && Array.isArray(it.verified) && it.verified.length ? h("span", { className: "dshm-badge", title: it.verified.join("、") }, lookup("badge.verified")) : null,
         it.audience === "internal" ? h("span", { className: "dshm-badge" }, lookup("badge.internal")) : null,
         it.installed ? h("span", { className: "dshm-badge" }, lookup("badge.installed")) : null,
         it.community === true ? h("span", { className: "dshm-badge info" }, lookup("badge.community")) : null,
@@ -1794,6 +1795,14 @@ const ZONE_TABS = [
 ];
 
 // 社区区排序（0.7.2 起选项入「筛选」弹层：filter.field 系 + filter.dir 系键，下拉 SORT_OPTIONS 退役）。
+
+// B 方案（2026-10-13）：verified 从卡面徽章降级为 byline 灰字——徽章位让给例外信号（弃用/自用/可升级），
+// 兼容信息零丢失（详情弹窗「实测版本」行保留全量清单；tooltip 仍挂完整列表）。
+// 取 verified 末位＝按 008/022 纪律按时间顺序追加的最新复验版本。
+const verifiedByline = (it) =>
+  it.community !== true && Array.isArray(it.verified) && it.verified.length
+    ? { text: lookup("byline.verified", { v: it.verified[it.verified.length - 1] }), title: it.verified.join("、") }
+    : null;
 
 function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, onOpenOps }) {
   const [zone, setZone] = useState("community");
@@ -2180,7 +2189,6 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
             )
           : null,
         it.deprecated === true ? h("span", { className: "dshm-badge warn", key: "dep" }, lookup("badge.deprecated")) : null,
-        it.community !== true && Array.isArray(it.verified) && it.verified.length ? h("span", { className: "dshm-badge", key: "v", title: it.verified.join("、") }, lookup("badge.verified")) : null,
         it.audience === "internal" ? h("span", { className: "dshm-badge dshm-badge-internal", key: "internal" }, lookup("badge.internal")) : null,
         it.outdated ? h("span", { className: "dshm-badge warn", key: "u" }, lookup("badge.update")) : null,
         it.installed ? h("span", { className: "dshm-badge", key: "i" }, lookup("badge.installed")) : null,
@@ -2194,7 +2202,10 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
             typeof it.downloads === "number" ? { text: `${compactCount(it.downloads)} ↓`, title: String(it.downloads) } : null,
             typeof it.stars === "number" ? { text: `${compactCount(it.stars)} ★`, title: String(it.stars) } : null,
           ].filter(Boolean)
-        : (it.tags || []).map((t) => ({ text: `#${t}` })),
+        : [
+            ...(it.tags || []).map((t) => ({ text: `#${t}` })),
+            verifiedByline(it),
+          ].filter(Boolean),
       desc: browserLang() === "en" && typeof it.descriptionEn === "string" && it.descriptionEn !== "" ? it.descriptionEn : it.description,
       clampLines: it.community === true ? 5 : 2,
       sub: [
@@ -3044,12 +3055,12 @@ function FavoriteZone({ favorites, onOpen }) {
           name: s.name,
           badges: [
             s.deprecated === true ? h("span", { className: "dshm-badge warn", key: "dep" }, lookup("badge.deprecated")) : null,
-            // 0.9.45 U12（R7 收窄）：无 owner = 精选条目——补「精选」身份徽标；verified 质量徽标恢复；
+            // 0.9.45 U12（R7 收窄）：无 owner = 精选条目——补「精选」身份徽标；
+            // verified 徽标已移除（2026-10-13 B 方案：卡面只留例外信号，实测信息在详情弹窗「实测版本」行）；
             // 受众/解耦徽标不进收藏区（DESIGN §2.7 裁决⑤「已装视图与收藏页不打标」），快照仅存字段
             s.owner
               ? h("span", { className: "dshm-badge info", key: "c" }, lookup("badge.community"))
               : h("span", { className: "dshm-badge", key: "cz" }, lookup("zone.primary")),
-            Array.isArray(s.verified) && s.verified.length && s.community !== true ? h("span", { className: "dshm-badge", key: "v", title: s.verified.join("、") }, lookup("badge.verified")) : null,
             h("span", { className: "dshm-badge info", key: "s" }, s.source === "npm" ? "npm" : "github"),
             isStale ? h("span", { className: "dshm-badge warn", key: "st" }, lookup("favorites.stalebadge")) : null,
           ],
