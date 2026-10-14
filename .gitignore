@@ -12,3 +12,6 @@ research-dshmarketplace/
 .DS_Store
 .review-evidence.txt
 .e2e-*.png
+# verify-*.mjs 探针临时入口（main.jsx 副本+追加导出，必须留在 src/client/ 解析相对
+# require，用后即删；kill 残留由本模式兜底，执行评审 E4）
+src/client/.verify-*-entry.jsx
