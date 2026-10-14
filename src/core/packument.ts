@@ -93,21 +93,22 @@ export async function fetchPackumentDoc(
   }
 }
 
-/** 生效源单腿 strict 取数（warm 与 readme 兜底腿的取数原语；失败抛原始错误）。 */
+/** 生效源单腿 strict 取数（warm 与 readme 兜底腿的取数原语；失败抛原始错误）。返回 doc 与取数所用 base——调用方回填键必须用同一 base（评审 R1-1：一次生效源判定贯穿取数与回填，杜绝路由切换窗口的键错配）。 */
 async function fetchDocViaActiveThrowing(
   pkg: string,
   timeoutMs: number,
   signal?: AbortSignal,
   deps?: PackumentAccessorDeps,
-): Promise<Record<string, unknown>> {
+): Promise<{ doc: Record<string, unknown>; base: string }> {
   if (!PKG_RE.test(pkg)) throw new Error(`无效 npm 包名: ${pkg}`)
   const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
   const base = await activeNpmRegistry()
-  return (await fetcher(`${registryBase(base)}/${encodeURIComponent(pkg)}`, {
+  const doc = (await fetcher(`${registryBase(base)}/${encodeURIComponent(pkg)}`, {
     timeoutMs,
     signal,
     maxBytes: 8 * 1024 * 1024,
   })) as Record<string, unknown>
+  return { doc, base }
 }
 
 // ---------- 视图层 ----------
@@ -241,8 +242,9 @@ export async function packumentDocViewsActive(
   const key = packumentKey(pkg, await activeNpmRegistry())
   const hit = packumentCache.get(key)
   if (hit && Date.now() - hit.at < PACKUMENT_TTL_MS && hit.views !== null) return hit.views
-  const views = packumentViews(await fetchDocViaActiveThrowing(pkg, timeoutMs, signal, deps))
-  backfill(key, views)
+  const { doc, base } = await fetchDocViaActiveThrowing(pkg, timeoutMs, signal, deps)
+  const views = packumentViews(doc)
+  backfill(packumentKey(pkg, base), views)
   return views
 }
 
@@ -257,9 +259,8 @@ export async function warmPackumentFor(
   signal?: AbortSignal,
   deps?: PackumentAccessorDeps,
 ): Promise<void> {
-  const docFetched = await fetchDocViaActiveThrowing(pkg, timeoutMs, signal, deps)
-  const key = packumentKey(pkg, await activeNpmRegistry())
-  backfill(key, packumentViews(docFetched))
+  const { doc, base } = await fetchDocViaActiveThrowing(pkg, timeoutMs, signal, deps)
+  backfill(packumentKey(pkg, base), packumentViews(doc))
 }
 
 // ---------- 迁入的 registry 元数据函数（versions.ts 原名 re-export，import 位零改动） ----------

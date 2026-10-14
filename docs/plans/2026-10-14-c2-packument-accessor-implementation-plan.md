@@ -3,6 +3,7 @@
 > 修订 v2（2026-10-14，评审 G1-1～G1-9 全接受）：① 出锁补「锁前廉价文件存在性预读」保「本地检查先行」钉子（G1-1）；② 发版号 0.9.85→0.9.86（0.9.85 已于当日 18:07 发布占用，G1-2）；③ warm 腿策略裁决为「生效源单腿直取」保持现状语义（G1-3）；④ 失败负缓存同 TTL 入缓存（G1-4）；⑤ 访问器签名统一位置式 + deps 线到两腿 + 用例间清缓存隔离（G1-5）；⑥ npmPackumentTimes 薄委托化（G1-6）；⑦ 取数层拆 strict/lenient 双面保 readme 阶梯错误透传（G1-7）；⑧ onRouteSwitch 注册归一 + 缓存键钉死（G1-8）；⑨ GLOSSARY 与本计划入 Task 1 checkpoint（G1-9）。
 > 修订 v3（2026-10-14，评审 G2-1～G2-4 全接受）：⑩ 锁内零网络断言的锁入口标记改为「第 2 次 readFile（锁内重读）」并断言完整时序（G2-1）；⑪ readme 隐式 registry 兜底腿改走访问器**新增「生效源单腿带缓存」面**（与 warm 同腿策略，共享缓存不换腿；负缓存条目仅 lenient 面消费，strict 面视 null 为 miss 以保原始错误透传；补 URL host 锚治 versions.test.mjs 路由盲）（G2-2，采方案 a）；⑫ versions.test.mjs 隐式 registry 用例前清访问器缓存（G2-3）；⑬ extractGithubRepo 随 readme 函数迁入 packument.ts，versions.ts 如旧 re-export（防反向 import 成环）（G2-4）。
 > 执行备注（2026-10-14，执行评审 H1-1 补档）：① exclude-governance 锁外取数保留 `?? cachedPackumentTimes` 原绑定（Step 3 ① 原文写 `?? packumentTimes`）——薄委托语义同一函数链，少动一处 import；② `_resetReleaseAgeCachesForTests` 实现体重定向为 `clearPackumentAccessorCache()`——测试钩子随缓存属主迁移。
+> 执行评审 R1 备注（2026-10-14，c2-exec-reviewer R1-1～R1-4 全接受）：R1-1 取数原语改返回 `{doc, base}`——一次生效源判定贯穿取数与回填键，杜绝路由切换窗口键错配；R1-2 补 npmPackumentReadme 显式 registry 回归例；R1-3 stubWire 记录 opts 并断言首腿 5s 收紧/备腿满额；R1-4 Active 面 miss 无 single-flight 存档入 ADR-0019 决策 4。
 
 ## 目标
 

@@ -41,16 +41,18 @@ const doc = (over = {}) => ({
 function stubWire(routes) {
   const calls = { npmjs: 0, mirror: 0, other: 0 }
   const log = []
-  const fn = async (url) => {
+  const optsLog = []
+  const fn = async (url, opts) => {
     const host = url.startsWith(NPMJS) ? 'npmjs' : url.startsWith(MIRROR) ? 'mirror' : 'other'
     calls[host] += 1
     log.push(url)
+    optsLog.push({ url, timeoutMs: opts?.timeoutMs })
     const route = routes[host]
     if (typeof route === 'function') return route(url)
     if (route && route.throw) throw new Error(route.throw)
     return route ?? null
   }
-  return { fn, calls, log }
+  return { fn, calls, log, optsLog }
 }
 
 const setRoute = (base) => {
@@ -79,6 +81,16 @@ describe('取数双面：两腿阶梯（npmjs 首腿 5s 收紧 → 生效源备�
     const d2 = await fetchDocThrowing('p1', 12_000, undefined, { fetchJsonLimited: w2.fn })
     assert.ok(d2 && d2.time, '备腿命中')
     assert.equal(w2.calls.mirror, 1)
+    assert.deepEqual(
+      w2.optsLog.filter((e) => e.url.startsWith(NPMJS)).map((e) => e.timeoutMs),
+      [5000],
+      '首腿超时收紧 min(timeoutMs, 5s)（评审 R1-3）',
+    )
+    assert.deepEqual(
+      w2.optsLog.filter((e) => e.url.startsWith(MIRROR)).map((e) => e.timeoutMs),
+      [12_000],
+      '备腿满额超时（评审 R1-3）',
+    )
 
     const w3 = stubWire({ npmjs: { throw: 'npmjs timeout' }, mirror: { throw: '终末腿错误' } })
     await assert.rejects(() => fetchDocThrowing('p1', 12_000, undefined, { fetchJsonLimited: w3.fn }), /终末腿错误/)
@@ -259,5 +271,11 @@ describe('搬迁函数回归（签名形状锚）', () => {
     const ver = await npmVersion('x', '1.2.3', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn })
     assert.equal(ver.version, '1.2.3')
     assert.deepEqual(ver.peers, { react: '^18' })
+  })
+  it('npmPackumentReadme 显式 registry 直取（R1-2 搬迁回归：不走缓存）', async () => {
+    const w = stubWire({ other: (url) => (url.endsWith('/latest') ? doc({ readme: 'explicit-readme' }) : doc()) })
+    const r = await npmPackumentReadme('x', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn })
+    assert.equal(r.readme, 'explicit-readme')
+    assert.ok(w.log.every((u) => u.startsWith('https://r.example')), '显式 registry 直取')
   })
 })
