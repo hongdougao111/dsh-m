@@ -28,6 +28,6 @@
 
 - **性能预期**：镜像机器装机登记阶段 −（5s 首腿 + 至 12s 备腿）锁内白等，锁体回归纯 fs 毫秒级；B3 预热的取数并入共享缓存（同一安装操作里预检/登记/预热最多付一次全量取）；预检与登记共享 single-flight。
 - **验收门**：1461 项测试全绿（执行基线 1443 + 新增 18：packument 17 + 锁内零网络 1）+ typecheck 零错误；锁内零网络断言（第 2 次 readFile 后 fetch 增量 = 0 + 完整时序预读→fetch→锁内重读）；访问器全语义单测（两腿降级/strict-lenient/single-flight builds 哨兵/TTL/cap/负缓存/route-switch 作废/warm 单腿 bypass+回填/Active 面负缓存视 miss/readme 阶梯三态含 URL host 锚）。
-- **行为零变化承诺**：ADR-0009 登记判定分支与 fail-open、ADR-0012 两腿时序与路由作废、R4c abort 语义、readme 阶梯 0.9.50 语义（含 latest-ok-空 + packument-败的降级不抛）、`「本地检查先行」`钉子、既有 release-age/profile-transaction 用例全部保持；唯一明示契约变化 = 决策 7（隐式 npmPackument 两腿化，无生产消费方）。
+- **行为零变化承诺**：ADR-0009 登记判定分支与 fail-open、ADR-0012 两腿时序与路由作废、R4c abort 语义、readme 阶梯 0.9.50 语义（含 latest-ok-空 + packument-败的降级不抛）、`「本地检查先行」`钉子、既有 release-age/profile-transaction 用例全部保持；唯一明示契约变化 = 决策 7（隐式 npmPackument 两腿化，无生产消费方）。执行侧两处委托链替身（exclude-governance 锁外取数沿用 `cachedPackumentTimes` 薄委托绑定；`_resetReleaseAgeCachesForTests` 重定向访问器清缓存）语义同一函数链，已随计划执行备注入档。
 - **GLOSSARY**：「packument 访问器（Packument Accessor）」词条已入档。
 - **发布形态**：0.9.86（发版件随需求方放行后落，OIDC tag 流程）。
