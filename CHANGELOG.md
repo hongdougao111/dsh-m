@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.86 性能：packument 访问器——registry 元数据属主模块，登记网络腿出锁（钢人 C2 / ADR-0019）
+
+- **问题（钢人报告 C2 节）**：「registry 元数据」没有 owning module——登记（Register）只为读一个发布时戳，却在官方文件锁内发起 8MiB 级全量 packument 网络取（npmjs 首腿 5s 超时 + 生效源备腿至 12s），镜像机器装机的白等直接计入关键路径；B3 预热再经无缓存通道把同一全量取付第二次；三 adapter 各自取、各自缓存（或没有）。
+- **修复（ADR-0019）**：新属主模块 `src/core/packument.ts`——一次取回派生视图包 `{times, versions, distTags, readme, repo}`，按 (pkg, 生效源) 键缓存（TTL 5min / single-flight / cap=4 / 失败与 regex-invalid 负缓存同 TTL / onRouteSwitch 作废 + 生效源入键双保险）。登记 times **出锁**：发布时戳是不可变历史事实，锁外预取零 TOCTOU，锁体回归纯 fs（锁前存在性预读保「文件缺席零探测」钉子）；预检/登记共享 single-flight；B3 预热改 `warmPackumentFor`（bypass 缓存 + 生效源单腿真发暖 CDN + 回填）；readme 兜底腿同款单腿带缓存面（终末错误透传保全）。latest 小端点与 ADR-0006 制度不并入；四函数 + `extractGithubRepo` 迁入属主、versions.ts 原名 re-export（import 位零改动）。
+- **验证**：1462 项测试全绿（访问器 18 例新增：两腿超时收紧断言/single-flight 哨兵/负缓存/cap/路由作废/warm 单腿 bypass+回填/Active 面负缓存视 miss/readme 阶梯三态含 URL host 锚/锁内零网络时序断言）、typecheck 零错误；真机冒烟：访问器冷 143–269ms / 热 0ms / warm bypass 真发 29ms，登记真实 wire（临时 profile + 真实 young 版本）applied:true 111ms + 幂等 up-to-date 3ms；实施计划经独立评审三轮（13 条）+ 执行评审两轮（4 条建议全收口）。
+
 ### 0.9.85 优化：版本号迁「关于」链接行尾 + 头部自升级入本地操作泵（两则真机反馈）
 
 - **① 版本号迁位（主人定稿）**：0.9.84 把插件版本号挂在「关于」标题行 sub（弱化灰字），真机对照后主人拍板迁至**链接行尾**（GitHub · 问题反馈 · npm · v0.9.85）——与外向元数据同组更协调，标题行回归纯净。缺失（ping 失败 → null）时整段不渲染，不留悬空分隔点；新增 `.dshm-links-ver` 弱化样式（label-secondary + tabular-nums）。不放升级入口的裁决不变。
@@ -602,6 +608,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Performance in 0.9.86 — packument accessor: registry metadata gets an owning module, register's network leg leaves the lock (steelman C2 / ADR-0019)
+
+- **Problem (steelman report, card C2)**: "registry metadata" had no owning module - Register fetched an 8MiB-scale full packument INSIDE the official file lock just to read one publish timestamp (npmjs first leg 5s timeout + effective-source leg up to 12s), putting mirror machines' white-wait directly on the install critical path; the B3 prewarm paid the same full fetch a second time through an uncached channel; three adapters each fetched, interpreted and cached (or not) independently.
+- **Fix (ADR-0019)**: new owning module `src/core/packument.ts` - one fetch derives a view bundle `{times, versions, distTags, readme, repo}`, cached under (pkg, effective registry) keys (TTL 5min / single-flight / cap=4 / failures and regex-invalids negative-cached for the same TTL / onRouteSwitch invalidation + registry-in-key double insurance). Register's timestamp fetch **leaves the lock**: publish timestamps are immutable historical facts (zero TOCTOU), the lock body is pure fs again (a cheap pre-lock existence read preserves the "local check first" pin). Precheck and register share single-flight; B3 prewarm uses `warmPackumentFor` (cache-bypassing + effective-source single-leg real request to warm the CDN + backfill); the readme fallback leg shares the same single-leg cached face (final-leg error passthrough preserved). The latest small endpoint and ADR-0006 stay out of scope; four functions + `extractGithubRepo` moved into the owner, versions.ts re-exports under the original names (zero import-site changes).
+- **Verification**: 1462 tests green (18 accessor cases added: two-leg timeout-tightening assertions / single-flight sentinel / negative cache / cap / route invalidation / warm single-leg bypass+backfill / Active-face negative-cache-as-miss / readme ladder three states with URL host anchors / in-lock zero-network timing assertion), typecheck clean; live smoke: accessor cold 143-269ms / warm 0ms / warm bypass real request 29ms, register real-wire (temp profile + genuinely young version) applied:true in 111ms + idempotent up-to-date in 3ms; the plan closed over three independent review rounds (13 findings) + two execution review rounds (4 suggestions).
 
 ### 0.9.85 Enhancement — version moves to the About links row + head self-upgrade enters the local ops pump (two real-device reports)
 
