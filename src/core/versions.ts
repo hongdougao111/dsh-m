@@ -3,10 +3,24 @@
  * npm：registry /latest（pnpm 安装本身会按 lock integrity 校验 tarball）。
  * GitHub：优先最新 release/tag（更新提示只跟稳定版走，不跟 main HEAD——中间提交可能不稳定）；
  * 未认证限额 60 次/小时，自用足够。
+ *
+ * 0.9.86（ADR-0019）：npm registry 元数据族（npmVersion/npmPackument/npmPackumentReadme/
+ * npmLatest/extractGithubRepo/isExactVersion 及其类型）实现已迁入 packument 访问器属主模块；
+ * 本文件原名 re-export 保全部 import 位零改动，自身只留 GitHub 族。
  */
 import { gt } from 'semver'
 import { fetchJsonLimited, HttpError } from './httpx.js'
-import { DEFAULT_NPM_REGISTRY, NPM_MIRROR, activeNpmRegistry, syncNpmmirrorPackage } from './npm-route.js'
+import { isExactVersion } from './packument.js'
+
+export {
+  npmVersion,
+  npmPackument,
+  npmPackumentReadme,
+  npmLatest,
+  extractGithubRepo,
+  isExactVersion,
+} from './packument.js'
+export type { NpmLatest, NpmVersionMetadata, NpmVersionDetail, NpmVersionDeps, NpmLatestDeps } from './packument.js'
 
 /** GitHub 匿名限额（60 次/小时/IP）用尽时返回可读提示（含重置等待分钟数），否则 null。 */
 function githubRateLimitMessage(err: unknown): string | null {
@@ -22,250 +36,6 @@ function githubRateLimitMessage(err: unknown): string | null {
   return null
 }
 
-export interface NpmLatest {
-  version: string
-  integrity?: string
-  tarball?: string
-}
-
-/** 精确版本 metadata（Task 8 integrity 校验使用，与 NpmLatest 同形）。 */
-export type NpmVersionMetadata = NpmLatest
-
-/** 精确版本完整详情（0.4.0 兼容预检）：同 NpmLatest + 该版本 peerDependencies 原样。 */
-export interface NpmVersionDetail extends NpmLatest {
-  peers: Record<string, string>
-}
-
-/** registry base 归一（去尾斜杠；空/缺省 → 官方 npmjs）。 */
-function registryBase(registry?: string): string {
-  const base = typeof registry === 'string' && registry.trim() !== '' ? registry.trim() : 'https://registry.npmjs.org'
-  return base.replace(/\/+$/, '')
-}
-
-/** 精确 semver：接受 prerelease/build metadata，拒绝 v 前缀、range、tag 与脏尾缀。 */
-const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
-
-export function isExactVersion(version: string): boolean {
-  return EXACT_VERSION_RE.test(version)
-}
-
-/** 读取该精确版本的 dist metadata（不使用 /latest endpoint）；integrity 缺失由调用方拒绝安装。 */
-export interface NpmVersionDeps {
-  fetchJsonLimited?: typeof fetchJsonLimited
-  syncNpmmirror?: typeof syncNpmmirrorPackage
-  /** 有界等待（sync 受理 → 镜像可见的窗口，默认 10s、abort-aware）。 */
-  wait?: (ms: number, signal?: AbortSignal) => Promise<void>
-}
-
-function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(t)
-      signal?.removeEventListener('abort', done)
-      resolve()
-    }
-    const t = setTimeout(done, ms)
-    signal?.addEventListener('abort', done, { once: true })
-  })
-}
-
-/**
- * 精确版本元数据（兼容预检/integrity 锚定）。L2① 履约阶梯（ADR-0012）：
- * 显式 registry 参数 > 生效源 → 失败且生效源为镜像 → sync → 有界等待 10s → 同源重试一次
- * → 仍败 → npmjs 兜底（sync+重试为尽力而为，npmjs 兜底是主安全网）；
- * 主源即 npmjs 时失败直接抛（权威源无镜像滞后可言）。
- */
-export async function npmVersion(
-  pkg: string,
-  version: string,
-  timeoutMs = 20_000,
-  signal?: AbortSignal,
-  registry?: string,
-  deps?: NpmVersionDeps,
-): Promise<NpmVersionDetail> {
-  if (!/^@?[A-Za-z0-9-._~]+(\/[A-Za-z0-9-._~]+)?$/.test(pkg)) throw new Error(`无效 npm 包名: ${pkg}`)
-  if (!isExactVersion(version)) throw new Error(`不是精确版本（拒绝 range/tag/前缀）: ${version}`)
-  const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
-  const sync = deps?.syncNpmmirror ?? syncNpmmirrorPackage
-  const wait = deps?.wait ?? sleepAbortable
-  const leg = async (base: string): Promise<NpmVersionDetail> => {
-    const data = await fetcher<{
-      version?: unknown
-      dist?: { integrity?: unknown; tarball?: unknown }
-      peerDependencies?: unknown
-    }>(`${registryBase(base)}/${encodeURIComponent(pkg)}/${version}`, { timeoutMs, signal })
-    const resolved = typeof data.version === 'string' ? data.version : ''
-    if (!resolved) throw new Error(`npm 未返回版本: ${pkg}@${version}`)
-    const peers: Record<string, string> = {}
-    if (data.peerDependencies !== null && typeof data.peerDependencies === 'object') {
-      for (const [name, range] of Object.entries(data.peerDependencies as Record<string, unknown>)) {
-        if (typeof range === 'string') peers[name] = range
-      }
-    }
-    return {
-      version: resolved,
-      integrity: typeof data.dist?.integrity === 'string' ? data.dist.integrity : undefined,
-      tarball: typeof data.dist?.tarball === 'string' ? data.dist.tarball : undefined,
-      peers,
-    }
-  }
-  const primary = registry?.trim() ? registry.trim() : await activeNpmRegistry()
-  try {
-    return await leg(primary)
-  } catch (firstErr) {
-    // L2①（ADR-0012）：仅 sync 真正受理（评审 R1-2：kill switch / 同步失败返回 false 时
-    // 不付 10s 等待成本、不发必 404 的同源重试——「风险与回退」承诺的行为回到现状）才重试镜像。
-    if (primary === NPM_MIRROR && (await sync(pkg))) {
-      await wait(10_000, signal)
-      try {
-        return await leg(primary)
-      } catch {
-        // 同源重试仍败 → npmjs 兜底
-      }
-    }
-    if (primary !== DEFAULT_NPM_REGISTRY) return leg(DEFAULT_NPM_REGISTRY)
-    throw firstErr
-  }
-}
-
-/**
- * 拉取完整 packument（NO_MATCHING_VERSION 退避重试前的预热/校验原语）。
- * 返回该包已知的全部版本号；解析不出 versions 时返回空列表（不抛）。
- * L1（ADR-0012/R1-6）：registry 参数曾被忽略——现「显式参数 > 生效源」。
- */
-export async function npmPackument(
-  pkg: string,
-  timeoutMs = 20_000,
-  signal?: AbortSignal,
-  registry?: string,
-  deps?: Pick<NpmVersionDeps, 'fetchJsonLimited'>,
-): Promise<{ versions: string[] }> {
-  if (!/^@?[A-Za-z0-9-._~]+(\/[A-Za-z0-9-._~]+)?$/.test(pkg)) throw new Error(`无效 npm 包名: ${pkg}`)
-  const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
-  const base = registry?.trim() ? registry.trim() : await activeNpmRegistry()
-  const data = await fetcher<{ versions?: unknown }>(`${registryBase(base)}/${encodeURIComponent(pkg)}`, {
-    timeoutMs,
-    signal,
-    maxBytes: 8 * 1024 * 1024,
-  })
-  const versions = data?.versions !== null && typeof data?.versions === 'object' ? Object.keys(data.versions as object) : []
-  return { versions }
-}
-
-/**
- * packument repository → "owner/repo"（仅 github.com；git+https / git@ / .git / #frag 归一；
- * 非 GitHub 返回空串——README 相对路径锚定只对 GitHub raw/blob 有意义）。0.9.48。
- */
-export function extractGithubRepo(v: unknown): string {
-  const url =
-    typeof v === 'string'
-      ? v
-      : v && typeof v === 'object' && typeof (v as { url?: unknown }).url === 'string'
-        ? (v as { url: string }).url
-        : ''
-  if (!url) return ''
-  const m = /github\.com[/:]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?(?:[/?#]|$)/i.exec(url)
-  return m ? `${m[1]}/${m[2]}` : ''
-}
-
-/**
- * npm packument readme 兜底（0.9.45 U10b 修复）：市场/收藏详情 Modal 的 README 折叠页对
- * 「未安装」条目无法走本地 profile 读取——回源 npm 兜底。安全基线同 npmPackument：HTTPS、
- * 8MB 上限；无 readme 字段返回空串（不抛，客户端显示「没有 README」）；L1（ADR-0012）：
- * 显式 registry 参数 > 生效源。
- * 0.9.48：随附 repo（repository 归一为 owner/repo，仅 GitHub），供 README 相对链接/图片
- * 锚定仓库基址；无 repository 或非 GitHub 时为空串。
- * 0.9.50：两腿阶梯——腿1 `/latest` 版本文档优先（KB 级小载荷，超大 packument 超帽免疫；
- * 超时收紧 `Math.min(timeoutMs, 5_000)`，同 npmLatest 首腿先例），readme 命中即短路；空或
- * 腿失败落腿2 packument（20s 满额，行为同 0.9.45）。任一腿成功即成功——readme 空渲染
- * 「没有 README」（含 latest 空白 readme + packument 失败的降级，不抛）；两腿全败抛终末腿
- * （packument）错误。两腿均在生效源，不跨源；两腿 readme 判空同一 trim 规则。repo 随到达
- * 的腿取 repository（packument 到达时以 packument 为准）。
- */
-export async function npmPackumentReadme(
-  pkg: string,
-  timeoutMs = 20_000,
-  signal?: AbortSignal,
-  registry?: string,
-  deps?: Pick<NpmVersionDeps, 'fetchJsonLimited'>,
-): Promise<{ readme: string; repo: string }> {
-  if (!/^@?[A-Za-z0-9-._~]+(\/[A-Za-z0-9-._~]+)?$/.test(pkg)) throw new Error(`无效 npm 包名: ${pkg}`)
-  const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
-  const base = registry?.trim() ? registry.trim() : await activeNpmRegistry()
-  const extractReadme = (data: { readme?: unknown } | undefined | null): string =>
-    typeof data?.readme === 'string' && data.readme.trim() !== '' ? data.readme : ''
-  // 腿1：/latest 版本文档（小载荷；超时收紧同 npmLatest 首腿先例）
-  let latestOk = false
-  let latestRepo = ''
-  try {
-    const latestDoc = await fetcher<{ readme?: unknown; repository?: unknown }>(
-      `${registryBase(base)}/${encodeURIComponent(pkg)}/latest`,
-      { timeoutMs: Math.min(timeoutMs, 5_000), signal, maxBytes: 8 * 1024 * 1024 },
-    )
-    latestOk = true
-    latestRepo = extractGithubRepo(latestDoc?.repository)
-    const latestReadme = extractReadme(latestDoc)
-    if (latestReadme) return { readme: latestReadme, repo: latestRepo }
-  } catch {
-    // latest 腿失败 → 落 packument 腿（终末腿语义见下）
-  }
-  // 腿2：packument（0.9.45 U10b 原兜底腿，行为不变）
-  try {
-    const data = await fetcher<{ readme?: unknown; repository?: unknown }>(
-      `${registryBase(base)}/${encodeURIComponent(pkg)}`,
-      { timeoutMs, signal, maxBytes: 8 * 1024 * 1024 },
-    )
-    return { readme: extractReadme(data), repo: extractGithubRepo(data?.repository) }
-  } catch (packumentErr) {
-    // latest 腿已成功证明包在而无有效 readme → 降级成功（空 readme），不冒充失败
-    if (latestOk) return { readme: '', repo: latestRepo }
-    throw packumentErr
-  }
-}
-
-export interface NpmLatestDeps {
-  fetchJsonLimited?: typeof fetchJsonLimited
-}
-
-/**
- * 升级探测（检测读）。L3 权威链（ADR-0012）：新鲜度敏感——npmjs 权威源优先
- * （首腿超时收紧 `Math.min(timeoutMs, 5_000)`），失败降级生效源（≠npmjs 时）；
- * 不设 sync 腿（两腿全败属网络型失败，sync 只救镜像滞后）。显式 registry 参数优先。
- */
-export async function npmLatest(
-  pkg: string,
-  timeoutMs = 20_000,
-  signal?: AbortSignal,
-  registry?: string,
-  deps?: NpmLatestDeps,
-): Promise<NpmLatest> {
-  // 允许 scoped 包名：@scope/name（isSafePkgName 同款字符集）
-  if (!/^@?[A-Za-z0-9-._~]+(\/[A-Za-z0-9-._~]+)?$/.test(pkg)) throw new Error(`无效 npm 包名: ${pkg}`)
-  const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
-  const leg = async (base: string, ms: number): Promise<NpmLatest> => {
-    const data = await fetcher<{
-      version?: unknown
-      dist?: { integrity?: unknown; tarball?: unknown }
-    }>(`${registryBase(base)}/${encodeURIComponent(pkg)}/latest`, { timeoutMs: ms, signal })
-    const version = typeof data.version === 'string' ? data.version : ''
-    if (!version) throw new Error(`npm 未返回版本: ${pkg}`)
-    return {
-      version,
-      integrity: typeof data.dist?.integrity === 'string' ? data.dist.integrity : undefined,
-      tarball: typeof data.dist?.tarball === 'string' ? data.dist.tarball : undefined,
-    }
-  }
-  const explicit = registry?.trim()
-  if (explicit) return leg(explicit, timeoutMs)
-  const firstLegMs = Math.min(timeoutMs, 5_000)
-  try {
-    return await leg(DEFAULT_NPM_REGISTRY, firstLegMs)
-  } catch (firstErr) {
-    const alt = await activeNpmRegistry()
-    if (alt === DEFAULT_NPM_REGISTRY) throw firstErr
-    return leg(alt, timeoutMs)
-  }
-}
 
 export async function githubTagSha(repo: string, tag: string, timeoutMs = 20_000, signal?: AbortSignal, budget?: GithubBudget, apiBase: string = 'https://api.github.com'): Promise<string> {
   // commits/{ref} 会自动解引用 annotated tag，返回的才是可用于 #sha 锁定的 commit
@@ -472,7 +242,7 @@ export async function githubLatestTag(repo: string, timeoutMs = 20_000, signal?:
  */
 export function isNewerVersion(candidate: string, current: string): boolean {
   // 只接受精确 semver（与收录语义一致：v 前缀/range/tag 不参与比较）；非法输入不抛、一律 false
-  if (!EXACT_VERSION_RE.test(String(candidate ?? '')) || !EXACT_VERSION_RE.test(String(current ?? ''))) return false
+  if (!isExactVersion(String(candidate ?? '')) || !isExactVersion(String(current ?? ''))) return false
   try {
     return gt(String(candidate), String(current))
   } catch {

@@ -282,15 +282,24 @@ export async function registerExclusion(
     })
   const file = join(profileDir, WS_FILE)
   try {
+    // 锁前廉价存在性预读（ADR-0019，评审 G1-1）：文件缺席零探测直返 no-file——
+    // 「本地检查先行」契约（钉子测试 + 缺省绑定下测试离线可跑）双保。
+    try {
+      await doRead(file)
+    } catch {
+      return { applied: false, reason: 'no-file' as const }
+    }
+    // times 出锁（ADR-0019）：发布时戳是不可变历史事实，锁外预取零 TOCTOU——镜像机器
+    // 装机不再在官方文件锁内白等网络腿（最多 5s 首腿 + 12s 备腿）；取数失败 → not-young
+    // （fail-open 口径不变，ADR-0009 判定分支逐字未动）。
+    const times = await (deps.packumentTimes ?? cachedPackumentTimes)(target.pkg, 12_000)
     return await withFileLock(join(profileDir, 'package.json'), async () => {
-      // 本地检查先行：文件缺席直接 no-file（不发 registry 探测——缺省绑定下测试离线可跑）
       let yaml: string
       try {
-        yaml = await doRead(file)
+        yaml = await doRead(file) // 锁内重读续走：锁保护的是写，读的 TOCTOU 无害
       } catch {
         return { applied: false, reason: 'no-file' as const }
       }
-      const times = await (deps.packumentTimes ?? cachedPackumentTimes)(target.pkg, 12_000)
       const now = deps.nowMs ?? Date.now()
       const publishedAt = times ? Date.parse(times[target.version] ?? '') : NaN
       if (!Number.isFinite(publishedAt)) return { applied: false, reason: 'not-young' as const }

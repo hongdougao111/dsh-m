@@ -12,6 +12,7 @@ import { join } from 'node:path'
 
 import { listInstalledWithMeta, installFromRegistry } from '../lib/core/market.js'
 import { npmLatest, npmPackument, npmPackumentReadme, npmVersion } from '../lib/core/versions.js'
+import { clearPackumentAccessorCache } from '../lib/core/packument.js'
 
 // 0.9.79：直调 installFromRegistry 会以 'external' 兜底落外部操作日志——隔离 journal
 process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-versions-journal-')), 'external-operations.json')
@@ -368,6 +369,8 @@ describe('npmPackumentReadme（0.9.45 U10b 兜底 + 0.9.50 /latest 阶梯）', (
   })
 
   it('缺省走生效源贯穿两腿（形态断言不写死线路——ADR-0012 路由自适应；不做索引断言，probe-once 可能混入）', async () => {
+    // 0.9.86（G2-3）：隐式 registry 路径现走访问器缓存——用例前清空，防模块级缓存跨用例污染
+    clearPackumentAccessorCache()
     fetchCalls = []
     installMockFetch(async (url) => {
       if (url.endsWith('/pkg-default/latest')) return jsonResponse({ version: '1.0.0' })
@@ -736,19 +739,31 @@ describe('npmPackument 履约读（L1，R1-6 参数修复）', () => {
     assert.ok(calls[0].startsWith('https://registry.npmmirror.com/'))
   })
 
-  it('无显式参数 → 生效源（env 直采，不探测）', async () => {
+  it('无显式参数 → 访问器两腿（G3-2 备案：B3 改 warm 后此路径无生产消费方；npmjs 首腿，败降生效源）', async () => {
     process.env.DSHM_NPM_REGISTRY = 'https://registry.npmmirror.com'
     try {
+      clearPackumentAccessorCache()
       const calls = []
       const fetcher = async (url) => {
         calls.push(String(url))
         return { versions: { '2.0.0': {} } }
       }
-      await npmPackument('pkg-a', 5000, undefined, undefined, { fetchJsonLimited: fetcher })
-      assert.equal(calls.length, 1)
-      assert.ok(calls[0].startsWith('https://registry.npmmirror.com/'))
+      await npmPackument('pkg-twoleg', 5000, undefined, undefined, { fetchJsonLimited: fetcher })
+      assert.equal(calls.length, 1, '首腿 npmjs 成功即止')
+      assert.ok(calls[0].startsWith('https://registry.npmjs.org/'), 'npmjs 权威首腿')
+      clearPackumentAccessorCache()
+      calls.length = 0
+      const failing = async (url) => {
+        calls.push(String(url))
+        if (url.startsWith('https://registry.npmjs.org/')) throw new Error('npmjs down')
+        return { versions: { '2.0.0': {} } }
+      }
+      await npmPackument('pkg-twoleg2', 5000, undefined, undefined, { fetchJsonLimited: failing })
+      assert.equal(calls.length, 2, '首腿败 → 生效源备腿')
+      assert.ok(calls[1].startsWith('https://registry.npmmirror.com/'), '备腿 = env 生效源')
     } finally {
       delete process.env.DSHM_NPM_REGISTRY
+      clearPackumentAccessorCache()
     }
   })
 })

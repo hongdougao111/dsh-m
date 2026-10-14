@@ -37,7 +37,7 @@ import { join } from 'node:path'
 import { webProfileDir } from './env.js'
 import { isSafePkgName, resolvePluginDir } from './installed.js'
 import { setLivePluginDisabled } from './live-plugin.js'
-import { npmPackument } from './versions.js'
+import { warmPackumentFor } from './packument.js'
 import { syncNpmmirrorPackage } from './npm-route.js'
 import { clearAllLatestCache } from './latest-cache.js'
 import {
@@ -190,7 +190,10 @@ export type FailedTransactionResult = Exclude<TransactionResult, CommittedResult
  */
 export function makeNpmWarmPackument(
   timeoutMs: number,
-  fetcher: (pkg: string, timeoutMs: number, signal?: AbortSignal) => Promise<unknown> = npmPackument,
+  // 0.9.86（ADR-0019）：缺省 fetcher 改 warmPackumentFor——bypass 缓存 + 生效源单腿真发请求
+  // （预热的目的就是暖 CDN）+ 成功回填访问器缓存；abort 由本包装按 R4c 消化（rethrow）、
+  // 其余失败吞错（预热尽力而为）不变。
+  fetcher: (pkg: string, timeoutMs: number, signal?: AbortSignal) => Promise<unknown> = warmPackumentFor,
 ): (pkg: string, signal?: AbortSignal) => Promise<void> {
   return async (pkg: string, signal?: AbortSignal): Promise<void> => {
     try {

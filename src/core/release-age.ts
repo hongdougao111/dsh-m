@@ -27,7 +27,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isMap, isScalar, isSeq, parseDocument } from 'yaml'
 import { fetchJsonLimited } from './httpx.js'
-import { DEFAULT_NPM_REGISTRY, activeNpmRegistry, onRouteSwitch } from './npm-route.js'
+import { clearPackumentAccessorCache, fetchPackumentDoc, packumentTimes, packumentViews } from './packument.js'
 
 /** pnpm 11.7 实机测得的策略窗口：24h（operation-l5fXEd 的 cutoff = 检查时刻 − 1440min）。 */
 export const DEFAULT_MINIMUM_RELEASE_AGE_MIN = 1440
@@ -213,30 +213,9 @@ export interface PackumentTimesDeps {
   fetchJsonLimited?: typeof fetchJsonLimited
 }
 
-async function fetchPackumentTimes(
-  base: string,
-  pkg: string,
-  timeoutMs: number,
-  signal: AbortSignal | undefined,
-  fetcher: typeof fetchJsonLimited,
-): Promise<Record<string, string> | null> {
-  const data = await fetcher<{ time?: unknown }>(`${base}/${encodeURIComponent(pkg)}`, {
-    timeoutMs,
-    signal,
-    maxBytes: 8 * 1024 * 1024,
-  })
-  if (!data || typeof data !== 'object' || data.time === null || typeof data.time !== 'object') return null
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(data.time as Record<string, unknown>)) {
-    if (typeof v === 'string') out[k] = v
-  }
-  return out
-}
-
 /**
- * registry packument 的 time 映射（与 npmPackument 同源；失败返回 null，不抛）。
- * L3 权威链（ADR-0012）：发布时刻是完整性敏感读——npmjs 权威源优先（首腿超时收紧
- * `Math.min(timeoutMs, 5_000)`），失败降级生效源；两腿皆败 → null（fail-open 口径不变）。
+ * registry packument 的 time 映射（0.9.86 起薄委托 packument 访问器，ADR-0019：两腿阶梯
+ * 单份活代码于 fetchDocThrowing）。失败返回 null，不抛；L3 权威链（ADR-0012）语义不变。
  */
 export async function npmPackumentTimes(
   pkg: string,
@@ -244,21 +223,8 @@ export async function npmPackumentTimes(
   signal?: AbortSignal,
   deps?: PackumentTimesDeps,
 ): Promise<Record<string, string> | null> {
-  if (!/^@?[A-Za-z0-9-._~]+(\/[A-Za-z0-9-._~]+)?$/.test(pkg)) return null
-  const fetcher = deps?.fetchJsonLimited ?? fetchJsonLimited
-  const firstLegMs = Math.min(timeoutMs, 5_000)
-  try {
-    return await fetchPackumentTimes(DEFAULT_NPM_REGISTRY, pkg, firstLegMs, signal, fetcher)
-  } catch {
-    // 权威源不可达 → 生效源降级
-  }
-  const alt = await activeNpmRegistry()
-  if (alt === DEFAULT_NPM_REGISTRY) return null
-  try {
-    return await fetchPackumentTimes(alt, pkg, timeoutMs, signal, fetcher)
-  } catch {
-    return null
-  }
+  const doc = await fetchPackumentDoc(pkg, timeoutMs, signal, deps)
+  return doc ? packumentViews(doc).times : null
 }
 
 /** 读 profile 的 pnpm-workspace.yaml 策略；缺席/不可读 → null（调用方 fail-open）。 */
@@ -271,35 +237,27 @@ export async function readWorkspacePolicy(profileDir?: string): Promise<Workspac
   }
 }
 
-const packumentCache = new Map<string, { at: number; times: Record<string, string> | null }>()
-const PACKUMENT_CACHE_TTL_MS = 5 * 60_000
-
-/** L1（ADR-0012）：npm 生效源切换 → 作废 packument 缓存（镜像的答案不是官方源的答案）。 */
-export function clearPackumentCache(): void {
-  packumentCache.clear()
-}
-onRouteSwitch(() => clearPackumentCache())
-
 /**
- * 带进程内缓存的 packument time 探测（TTL 5min）：预检与登记（exclude-governance）
- * 共用——同一操作里预检刚拉过的 packument 不二次拉取（8MiB 级全量）。
+ * 0.9.86 薄委托（ADR-0019）：本地 Map/TTL/路由注册整体退役——缓存与作废语义由 packument
+ * 访问器属主承担（single-flight/TTL 5min/负缓存/cap=4/onRouteSwitch 唯一注册均在彼处）。
  */
+export function clearPackumentCache(): void {
+  clearPackumentAccessorCache()
+}
+
+/** 带缓存 packument time 探测（预检与登记共用）：薄委托访问器 times 视图，签名与语义不变。 */
 export async function cachedPackumentTimes(
   pkg: string,
   timeoutMs = 12_000,
   signal?: AbortSignal,
   deps?: PackumentTimesDeps,
 ): Promise<Record<string, string> | null> {
-  const hit = packumentCache.get(pkg)
-  if (hit && Date.now() - hit.at < PACKUMENT_CACHE_TTL_MS) return hit.times
-  const times = await npmPackumentTimes(pkg, timeoutMs, signal, deps)
-  packumentCache.set(pkg, { at: Date.now(), times })
-  return times
+  return packumentTimes(pkg, timeoutMs, signal, deps)
 }
 
-/** 测试钩子：清空 packument 进程内缓存。 */
+/** 测试钩子：清空 packument 进程内缓存（现属访问器）。 */
 export function _resetReleaseAgeCachesForTests(): void {
-  packumentCache.clear()
+  clearPackumentAccessorCache()
 }
 
 /**

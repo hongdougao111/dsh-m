@@ -298,4 +298,35 @@ describe('registerExclusion（落盘登记：young 判定内聚 + fail-open）',
     assert.equal(r.applied, false)
     assert.equal(r.reason, 'no-file')
   })
+  it('评审执行轮 C2：锁内零网络——times 取数先于锁（时序：预读 → fetch → 锁内重读）', async () => {
+    const dir = makeProfileDir(SAMPLE)
+    const events = []
+    let fetches = 0
+    const r = await registerExclusion(
+      dir,
+      { pkg: 'brand-new-pkg', version: '1.0.0' },
+      {
+        packumentTimes: async () => {
+          fetches += 1
+          events.push('fetch')
+          return { '1.0.0': isoAgo(MIN, NOW) }
+        },
+        // readFile spy：ws（pnpm-workspace.yaml）第 2 次读取 = 锁内重读 = 锁入口标记（首调是锁前预读，G2-1）。
+        // doRead 调用形为 (path) 单参——spy 内固定 utf8，勿透传 undefined（会得 Buffer）。
+        readFile: async (path) => {
+          events.push(String(path).endsWith('pnpm-workspace.yaml') ? 'read:ws' : 'read:other')
+          return readFileSync(path, 'utf8')
+        },
+        nowMs: NOW,
+      },
+    )
+    assert.equal(r.applied, true, 'young 版本成功登记（既有判定分支语义不变）')
+    const firstWs = events.indexOf('read:ws')
+    const lockEntry = events.indexOf('read:ws', firstWs + 1)
+    assert.ok(firstWs !== -1 && lockEntry !== -1, '预读 + 锁内重读两次 YAML 读取都在场')
+    const before = events.slice(0, lockEntry).filter((e) => e === 'fetch').length
+    const insideOrAfter = events.slice(lockEntry).filter((e) => e === 'fetch').length
+    assert.equal(insideOrAfter, 0, '锁体内零网络（第 2 次读之后 fetch 计数增量 = 0）')
+    assert.equal(before, fetches, '全部取数先于锁')
+  })
 })
