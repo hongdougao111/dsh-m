@@ -1,4 +1,4 @@
-// 0.9.84 设置页「关于」版本号源锚（client-lightbox.test.mjs 同款惯例：includes 级，
+// 0.9.84/0.9.85 设置页「关于」版本号源锚（client-lightbox.test.mjs 同款惯例：includes 级，
 // 红灯语义是「文本变了」而非「行为变了」）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,13 +9,11 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = readFileSync(join(root, "src/client/main.jsx"), "utf8");
 
-test("0.9.84 关于卡标题行 sub 挂裸版本号（缺失态零占位）", () => {
-  // Section 的兼容逻辑：sub 为字符串 → 标题行右侧灰字；null → 无 sub。pluginVersion
-  // 缺席（ping 失败）时槽位自然为空，与头部 chip「失败不留占位」同语义。
-  assert.ok(
-    src.includes('Section(lookup("settings.about"), version ? `v${version}` : null'),
-    "关于卡 sub 槽挂裸版本号在",
-  );
+test("0.9.85 关于卡链接行尾挂裸版本号（缺失态零占位、零悬空点）", () => {
+  assert.ok(src.includes('h("span", { className: "dshm-links-ver" }, `v${version}`)'), "链接行版本 span 在");
+  assert.ok(/version\s*\?\s*\[\s*h\("span", \{ className: "dshm-links-sep" \}/.test(src), "分隔点与版本同现（null 整段不渲染）在");
+  // 0.9.84 的标题行 sub 挂法退役（真机对照后迁链接行）
+  assert.ok(!src.includes('Section(lookup("settings.about"), version'), "标题 sub 挂法已退役");
 });
 
 test("0.9.84 pluginVersion 接线 SettingsTab（ping 单一事实源，不新增数据通路）", () => {

@@ -622,6 +622,7 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px;padding-top:6px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);font-size:11px;color:var(--dsw-alias-label-caption,#6b7280)}
 .dshm-links-k,.dshm-links-sep{color:var(--dsw-alias-label-caption,#9ca3af)}
 .dshm-links a{color:var(--dsw-alias-state-business-primary,#4d6bfe);text-decoration:none;font-weight:500}
+.dshm-links-ver{font-weight:500;color:var(--dsw-alias-label-secondary,#4b5563);font-variant-numeric:tabular-nums}
 .dshm-links a:hover{text-decoration:underline}
 .dshm-prog{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#4b5563)}
 .dshm-prog .bar{flex:1;height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-2,rgba(38,49,72,.08));overflow:hidden;min-width:80px}
@@ -2952,10 +2953,10 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
         : null,
     ),
     // ③ 关于：当前定位 + 仓库/反馈链接（dsh-m 自身卡已按主人要求移除——升级走市场卡片/CLI，self-check/self-upgrade API 保留）。
-    //    版本号挂标题行既有 sub 槽（0.9.84 主人真机反馈：窄容器头部 chip 常态隐藏后插件版本无处可查）——
-    //    零新增行/块/CSS/i18n；缺失（ping 失败 → null）时槽位自然为空，与头部 chip「失败不留占位」同语义；
-    //    不放升级入口——头部 ⬆ + 市场卡片/CLI 所有权不变（评审 E 轮对齐）。
-    Section(lookup("settings.about"), version ? `v${version}` : null,
+    //    版本号挂链接行尾（0.9.85 主人定稿：0.9.84 曾挂标题 sub，真机对照后迁此——与 GitHub/npm 等
+    //    外向元数据同组更协调）；缺失（ping 失败 → null）时整段不渲染，不留悬空分隔点；
+    //    不放升级入口——头部 ⬆ + 市场卡片/CLI 所有权不变。
+    Section(lookup("settings.about"),
       h("div", { className: "dshm-hint" }, lookup("settings.about.text")),
       h("div", { className: "dshm-links" },
         h(ExtLink, { href: "https://github.com/iasiv5/dsh-m" }, "GitHub"),
@@ -2963,6 +2964,12 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
         h(ExtLink, { href: "https://github.com/iasiv5/dsh-m/issues" }, lookup("settings.about.issues")),
         h("span", { className: "dshm-links-sep" }, "·"),
         h(ExtLink, { href: "https://www.npmjs.com/package/dsh-m" }, lookup("settings.about.npm")),
+        version
+          ? [
+              h("span", { className: "dshm-links-sep" }, "·"),
+              h("span", { className: "dshm-links-ver" }, `v${version}`),
+            ]
+          : null,
       ),
     ),
     // ④ 操作记录：恒通宽卡（第二批搬迁），进行中常驻 + 已结束滚动区，空态 hint 导览
@@ -3305,7 +3312,7 @@ const TABS = [
 // ---------- 头部 dsh-m 版本角标（0.9.1：常态静默只显版本；self-check 判 outdated 才点亮为可点升级角标） ----------
 // 数据源：host self-check（npm latest vs 装机版本）；localStorage TTL 缓存防每次开面板都打 npm。
 // 静默口径（主人 2026-10-01）：已最新 / 检查失败 / 本地 dev 领先 npm 一律维持 0.7.5 静态样式。
-function DshmVersionChip({ version, notify, initialCheck }) {
+function DshmVersionChip({ version, notify, initialCheck, ops }) {
   const [check, setCheck] = useState(() =>
     initialCheck !== undefined
       ? initialCheck
@@ -3332,7 +3339,16 @@ function DshmVersionChip({ version, notify, initialCheck }) {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await api("self-upgrade");
+      // 0.9.85（主人真机反馈：头部自升级在操作日志无记录）：入本地操作泵——渠道归属面板
+      // 通道零外部日志是 ADR-0018 不变量（host-api self-upgrade 显式 channel:'panel'），
+      // 泵记录才是面板操作的账本；opMeta {from,to} 落账 → 已结束渲染「升级 dsh-m vX→vY」。
+      // SSR/探针无 ops 时直连 api（行为同 0.9.84-）。stillApplies：dsh-m 恒已装 → 恒 applies。
+      const res = await (ops
+        ? ops.runOp("upgrade", "dsh-m", async () => {
+            const r = await api("self-upgrade");
+            return { ...r, opMeta: { from: version, to: r.version || "latest" } };
+          }, { npm: "dsh-m" })
+        : api("self-upgrade"));
       clearSelfCheckCache(typeof window !== "undefined" && window.localStorage ? window.localStorage : null);
       // 升级成功：缓存已清、本地判回最新态；重启横幅由 notify 的 needsRestart 通道给出
       setCheck({ current: version, latest: null, outdated: false, ahead: false });
@@ -3878,7 +3894,7 @@ function MarketPanel({ onClose }) {
           ),
         ),
         h("span", { className: "dshm-spacer" }),
-        pluginVersion ? h(DshmVersionChip, { version: pluginVersion, notify }) : null,
+        pluginVersion ? h(DshmVersionChip, { version: pluginVersion, notify, ops }) : null,
         profile && profile.kind !== "web"
           ? h("span", { className: "dshm-dshchip", title: lookup("profile.chipTitle", { name: profile.name }) }, profile.name)
           : null,

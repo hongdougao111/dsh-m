@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.85 优化：版本号迁「关于」链接行尾 + 头部自升级入本地操作泵（两则真机反馈）
+
+- **① 版本号迁位（主人定稿）**：0.9.84 把插件版本号挂在「关于」标题行 sub（弱化灰字），真机对照后主人拍板迁至**链接行尾**（GitHub · 问题反馈 · npm · v0.9.85）——与外向元数据同组更协调，标题行回归纯净。缺失（ping 失败 → null）时整段不渲染，不留悬空分隔点；新增 `.dshm-links-ver` 弱化样式（label-secondary + tabular-nums）。不放升级入口的裁决不变。
+- **② 头部自升级漏记根治（主人真机反馈：⬆ 升级在操作日志无记录）**：根因是渠道两不沾——host-api `self-upgrade` 显式 `channel: 'panel'`（ADR-0018「面板通道零外部日志」不变量，防漏标落 external），而头部 chip 的 `doUpgrade` 直接 `api("self-upgrade")` 绕过本地操作泵，两头都不记。修复：chip 接线 `ops`（面板操作账本）并入泵 `ops.runOp("upgrade", "dsh-m", …)`，执行器回传 `opMeta {from,to}` 落账 → 已结束列表渲染「升级 dsh-m vX→vY」；SSR/探针无 `ops` 时回退直连 api。`stillApplies` 语义安全：dsh-m 恒已装 → 恒 applies，不触发 superseded。全家族盘点：安装/升级/卸载/开关/清单源/社区开关/「全部更新」（逐条 runOp 入队）均无漏记，自升级是唯一缺口。
+- **验证**：1443 项测试全绿（0.9.84 基线 1440 + 新增源锚：about-version 迁位改写与 render-smoke 自升级入泵）、typecheck 零错误；F1 族就绪门连续三跑全量稳定（曾现一次 657/42 异常未再复现，归因共享机瞬时载荷，已留日志）。
+
 ### 0.9.84 优化：设置页「关于」标题行展示插件版本号
 
 - **问题（主人真机反馈）**：0.9.83 起窄容器下头部版本 chip 常态隐藏（共识 Q7——手机头部宽度让位给还原/关闭），插件自身版本号一度无处可查（设置页只有社区清单的「目录版本」）。
@@ -596,6 +602,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### 0.9.85 Enhancement — version moves to the About links row + head self-upgrade enters the local ops pump (two real-device reports)
+
+- **① Version relocation (owner's call)**: 0.9.84 hung the plugin version on the "About" title-row sub (muted small text); after on-device comparison the owner decided to move it to the **links row tail** (GitHub · Issues · npm · v0.9.85) — grouped with the outward metadata, the title row stays clean. Missing version (ping failure → null) renders nothing, no dangling separator; new `.dshm-links-ver` muted style (label-secondary + tabular-nums). The no-upgrade-entry ruling stands.
+- **② Head self-upgrade log gap cured (owner's real-device report: ⬆ upgrades were absent from the operations log)**: the root cause fell between two ledgers — host-api `self-upgrade` explicitly passes `channel: 'panel'` (ADR-0018 invariant "panel channel writes zero external records", guarding against mislabelled external rows), while the head chip's `doUpgrade` called `api("self-upgrade")` directly, bypassing the local ops pump — so neither recorded it. Fix: the chip receives `ops` (the panel's ledger) and goes through `ops.runOp("upgrade", "dsh-m", …)`; the executor returns `opMeta {from,to}` so the ended list renders "升级 dsh-m vX→vY"; SSR/probes without `ops` fall back to the direct api call. `stillApplies` is semantically safe: dsh-m is always installed → always applies, no superseded. Family audit: install/upgrade/uninstall/toggle/registry-source/community-toggle and "Update all" (per-item runOp enqueue) all record correctly — self-upgrade was the only gap.
+- **Verification**: 1443 tests green (0.9.84 baseline 1440 + new source anchors: about-version relocation rewrite and render-smoke self-upgrade pump), typecheck clean; the F1-family readiness gate held stable across three consecutive full runs (one anomalous 657/42 run never reproduced — attributed to transient load on this shared box, logs archived).
 
 ### 0.9.84 Enhancement — plugin version shown on the Settings "About" title row
 

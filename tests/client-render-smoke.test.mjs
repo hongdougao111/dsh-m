@@ -391,3 +391,11 @@ describe('0.9.76 分类行吸顶高频跳动修复（源码断言）——滚动
     assert.ok(src.includes('top: "-5px"'), '哨兵 -5px 契约不变')
   })
 })
+
+describe('0.9.85 头部自升级入本地操作泵（源码断言）——主人真机反馈：自升级在操作日志无记录', () => {
+  it('DshmVersionChip 走 ops.runOp（kind upgrade/target dsh-m + opMeta from/to 落账）且 ops 接线到头部', () => {
+    assert.match(src, /ops\.runOp\("upgrade", "dsh-m", async \(\) => \{\s*const r = await api\("self-upgrade"\);/, '自升级入泵（目标=自身包名，与 marketplace upgrade 锚 it.installedPkg 区分）')
+    assert.match(src, /opMeta: \{ from: version, to: r\.version \|\| "latest" \}/, 'from/to 版本变迁落账（opRowVm 渲染 vX→vY 的数据源）')
+    assert.ok(src.includes('h(DshmVersionChip, { version: pluginVersion, notify, ops })'), 'ops 接线头部 chip 在（SSR/探针无 ops 时回退直连 api）')
+  })
+})
