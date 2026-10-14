@@ -61,6 +61,7 @@
 | N1（第 2 轮） | 阻断 | Task 2 test5 正则内层括号未转义 → 测试文件解析失败 | 改为 includes 断言（Task 2，评审推荐方案） |
 | N2（第 2 轮） | 建议 | A6b/A6a chip 断言存在 ping 往返竞态（$eval 不自动等待） | 两处前置 waitForSelector（Task 8） |
 | N3（第 3 轮） | 阻断 | A6b 的 waitForSelector 默认 state:'visible'，而常态 chip 按设计 display:none → 必超时崩溃 | A6b 行改 `state:'attached'`（A6a warn 根可见，保持默认） |
+| （第 4 轮·终审） | — | 单点复核 N3 修复生效、第 3 轮通过内容零波及——通过，无新问题；本行即 CHANGELOG「独立评审 4 轮」的出处（第 4 轮无新问题故前表无行） | 本节 |
 
 ## 文件结构与职责
 
