@@ -129,36 +129,51 @@ describe('runCommand：失败异常必须能被 isPrepareBlocked 接住（端到
   // Windows 无进程组（detached 不生效、kill 即 TerminateProcess 直接终止 direct child），
   // 「settle 必须等 grace」的前提到处不成立——这些时序断言仅 POSIX 执行。
   const POSIX_ONLY = process.platform === 'win32' ? '依赖 POSIX 进程组/SIGTERM 语义，Windows 不适用' : false
-  const IGNORING_CHILD = (marker, delayMs) =>
-    `process.on('SIGTERM', () => {}); setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, ${delayMs})`
+  const IGNORING_CHILD = (marker, delayMs, ready) =>
+    `process.on('SIGTERM', () => {}); ${ready ? `require('fs').writeFileSync(${JSON.stringify(ready)}, 'x'); ` : ''}setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, ${delayMs})`
 
-  it('F1/T5：abort 后子进程忽略 SIGTERM → grace 升级 SIGKILL，reject 晚于 child 退出，marker 永不写出', { skip: POSIX_ONLY }, async () => {
+  it('F1/T5：abort 后子进程忽略 SIGTERM → grace 升级 SIGKILL，reject 晚于 child 退出，marker 永不写出', { skip: POSIX_ONLY }, async (t) => {
     const marker = join(tmpdir(), `dshm-kill-abort-${process.pid}-${Date.now()}.marker`)
+    // 就绪门（执行评审 E5，同 F1-R 族）：SIGTERM 免疫注册后写 ready——ready ⇒ abort 时组
+    // 非空。载荷下 exec 未完成时 SIGTERM 走默认动作击杀、组空快 reject 属合法（实测 115ms
+    // 假红即此形态），跳过下界。
+    const ready = join(tmpdir(), `dshm-kill-abort-ready-${process.pid}-${Date.now()}.marker`)
     const ac = new AbortController()
     const startedAt = Date.now()
-    const pending = runCommand(process.execPath, ['-e', IGNORING_CHILD(marker, 1500)], {
+    const pending = runCommand(process.execPath, ['-e', IGNORING_CHILD(marker, 1500, ready)], {
       timeoutMs: 60_000,
       signal: ac.signal,
       killGraceMs: 400,
     })
+    const readyDeadline = Date.now() + 3000
+    while (!existsSync(ready) && Date.now() < readyDeadline) await new Promise((r) => setTimeout(r, 25))
+    const groupArmed = existsSync(ready)
+    if (!groupArmed) t.diagnostic('child 3s 未就绪（载荷）——组空快 reject 属合法，跳过下界断言')
     setTimeout(() => ac.abort(), 100)
     await assert.rejects(pending, (err) => err.name === 'AbortError')
     const elapsed = Date.now() - startedAt
-    assert.ok(elapsed >= 400, `reject 必须等到子进程真正退出（SIGKILL 宽限后），实际 ${elapsed}ms`)
+    if (groupArmed) assert.ok(elapsed >= 400, `reject 必须等到子进程真正退出（SIGKILL 宽限后），实际 ${elapsed}ms`)
     await new Promise((r) => setTimeout(r, 2500)) // 越过 marker 计划写出时刻
     assert.equal(existsSync(marker), false, 'SIGKILL 必须先于 marker 写出——子进程不得在 reject 后继续写文件')
   })
 
-  it('F1/T5：超时同样升级 SIGKILL 并等待退出', { skip: POSIX_ONLY }, async () => {
+  it('F1/T5：超时同样升级 SIGKILL 并等待退出', { skip: POSIX_ONLY }, async (t) => {
     const marker = join(tmpdir(), `dshm-kill-timeout-${process.pid}-${Date.now()}.marker`)
+    const ready = join(tmpdir(), `dshm-kill-timeout-ready-${process.pid}-${Date.now()}.marker`)
     const startedAt = Date.now()
-    const pending = runCommand(process.execPath, ['-e', IGNORING_CHILD(marker, 1500)], {
+    const pending = runCommand(process.execPath, ['-e', IGNORING_CHILD(marker, 1500, ready)], {
       timeoutMs: 200,
       killGraceMs: 400,
     })
+    // 就绪门同 F1-R/C：ready 在 timeout 时刻（start+200）前出现 ⇒ 组非空，下界成立；
+    // 未及就绪（载荷）则组空快 reject 属合法，跳过下界
+    const readyDeadline = Date.now() + 3000
+    while (!existsSync(ready) && Date.now() < readyDeadline) await new Promise((r) => setTimeout(r, 25))
+    const groupArmed = existsSync(ready) && Date.now() - startedAt <= 200
+    if (!groupArmed) t.diagnostic('child 未在 timeout 前就绪（载荷）——跳过下界断言')
     await assert.rejects(pending, (err) => /命令超时 200ms/.test(err.message))
     const elapsed = Date.now() - startedAt
-    assert.ok(elapsed >= 400, `超时 reject 必须等到子进程退出，实际 ${elapsed}ms`)
+    if (groupArmed) assert.ok(elapsed >= 400, `超时 reject 必须等到子进程退出，实际 ${elapsed}ms`)
     await new Promise((r) => setTimeout(r, 2500))
     assert.equal(existsSync(marker), false, '被超时停止的子进程不得继续写文件')
   })
@@ -172,9 +187,13 @@ describe('runCommand：失败异常必须能被 isPrepareBlocked 接住（端到
     + `process.on('SIGTERM', () => process.exit(0)); `
     + `setInterval(() => {}, 1000); void g;`
 
-  it('F1-R/A：detached leader 先退、grandchild 忽略 SIGTERM → settle 等组消失，marker 不写出', { skip: POSIX_ONLY }, async () => {
+  it('F1-R/A：detached leader 先退、grandchild 忽略 SIGTERM → settle 等组消失，marker 不写出', { skip: POSIX_ONLY }, async (t) => {
     const marker = join(tmpdir(), `dshm-tree-abort-${process.pid}-${Date.now()}.marker`)
-    const grandchild = `process.on('SIGTERM', () => {}); setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, 1500)`
+    // 就绪门（执行评审 E5）：grandchild 先注册 SIGTERM 免疫再写 ready——ready ⇒ abort 时
+    // 组内必有免疫者，下界断言前提成立。载荷下 grandchild 未及 exec 时组空、快 settle 是
+    // 合法行为（实拍 112ms 假红即此形态），此时跳过下界只保留 marker 安全断言。
+    const ready = join(tmpdir(), `dshm-tree-abort-ready-${process.pid}-${Date.now()}.marker`)
+    const grandchild = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(ready)}, 'x'); setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, 1500)`
     const ac = new AbortController()
     const startedAt = Date.now()
     const pending = runCommand(process.execPath, ['-e', TREE_LEADER(grandchild)], {
@@ -183,26 +202,38 @@ describe('runCommand：失败异常必须能被 isPrepareBlocked 接住（端到
       killGraceMs: 400,
       detached: true,
     })
+    const readyDeadline = Date.now() + 3000
+    while (!existsSync(ready) && Date.now() < readyDeadline) await new Promise((r) => setTimeout(r, 25))
+    const groupArmed = existsSync(ready)
+    if (!groupArmed) t.diagnostic('grandchild 3s 未就绪（载荷）——组空快 settle 属合法，跳过下界断言')
     setTimeout(() => ac.abort(), 100)
     await assert.rejects(pending, (err) => err.name === 'AbortError')
     const elapsed = Date.now() - startedAt
-    assert.ok(elapsed >= 400, `leader close（~200ms）不得提前 settle，必须等组消失（grace 后 SIGKILL），实际 ${elapsed}ms`)
+    if (groupArmed) assert.ok(elapsed >= 400, `leader close（~200ms）不得提前 settle，必须等组消失（grace 后 SIGKILL），实际 ${elapsed}ms`)
     await new Promise((r) => setTimeout(r, 2500)) // 越过 grandchild marker 计划写出时刻
     assert.equal(existsSync(marker), false, '同组 grandchild 必须被组 SIGKILL，不得在 settle 后写文件')
   })
 
-  it('F1-R/C：timeout 同款进程树终止——leader 退出后组内幸存者由 SIGKILL 收口', { skip: POSIX_ONLY }, async () => {
+  it('F1-R/C：timeout 同款进程树终止——leader 退出后组内幸存者由 SIGKILL 收口', { skip: POSIX_ONLY }, async (t) => {
     const marker = join(tmpdir(), `dshm-tree-timeout-${process.pid}-${Date.now()}.marker`)
-    const grandchild = `process.on('SIGTERM', () => {}); setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, 1500)`
+    const ready = join(tmpdir(), `dshm-tree-timeout-ready-${process.pid}-${Date.now()}.marker`)
+    const grandchild = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(ready)}, 'x'); setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x') }, 1500)`
     const startedAt = Date.now()
     const pending = runCommand(process.execPath, ['-e', TREE_LEADER(grandchild)], {
       timeoutMs: 200,
       killGraceMs: 400,
       detached: true,
     })
+    // 就绪门同 F1-R/A：ready 在 timeout 时刻（start+200）之前出现 ⇒ 组非空，下界成立；
+    // 未及就绪（载荷）则组空快 settle 属合法，跳过下界。timeoutMs 维持 200 不动——
+    // 调大会把 SIGKILL（start+600）逼近 grandchild marker 时刻（born+1500），塌缩安全边际。
+    const readyDeadline = Date.now() + 3000
+    while (!existsSync(ready) && Date.now() < readyDeadline) await new Promise((r) => setTimeout(r, 25))
+    const groupArmed = existsSync(ready) && Date.now() - startedAt <= 200
+    if (!groupArmed) t.diagnostic('grandchild 未在 timeout 前就绪（载荷）——跳过下界断言')
     await assert.rejects(pending, (err) => /命令超时 200ms/.test(err.message))
     const elapsed = Date.now() - startedAt
-    assert.ok(elapsed >= 400, `必须等整组消失后才 settle，实际 ${elapsed}ms`)
+    if (groupArmed) assert.ok(elapsed >= 400, `必须等整组消失后才 settle，实际 ${elapsed}ms`)
     await new Promise((r) => setTimeout(r, 2500))
     assert.equal(existsSync(marker), false, 'timeout 的进程树终止必须覆盖 grandchild')
   })
