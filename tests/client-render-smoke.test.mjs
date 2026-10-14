@@ -163,8 +163,8 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
       initialCheck: { current: '0.9.0', latest: '0.9.1', outdated: true, ahead: false },
     }))
     assert.ok(html.includes('<button'), 'outdated 是可点按钮')
-    assert.ok(html.includes('dshm-dshchip warn'), 'warn 样式在')
-    assert.ok(html.includes('⬆ v0.9.1'), '箭头 + 最新版本号在')
+    assert.ok(html.includes('dshm-verchip warn'), 'warn 样式在')
+    assert.ok(html.includes('⬆<span class="dshm-up-v"> v0.9.1</span>'), '箭头 + 最新版本号在')
     // Node 21+ 有全局 navigator.language → browserLang 可能落 en；两语言都合法
     assert.ok(html.includes('发现新版本 v0.9.1') || html.includes('New version v0.9.1'), 'title 提示在')
   })

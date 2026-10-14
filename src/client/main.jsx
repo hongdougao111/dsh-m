@@ -673,6 +673,50 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
 .dshm-compat-peers{margin:0 0 8px;padding-left:18px;font-size:12px}
 .dshm-compat-peers li{font-family:ui-monospace,monospace}
 .dshm-compat-risk{font-size:12px;color:#f87171;margin-bottom:12px}
+/* ---------- 手机窄屏自适应（0.9.83，主人手机截图驱动） ---------- */
+/* 病灶（0.9.82 实拍）：.dshm-head 单行 no-wrap flex 最小内容宽 ~440-470px，手机面板
+   内容宽仅 330-365px → 行尾溢出被 .dshm-panel overflow:hidden 裁掉——winctl（还原/关闭）
+   不可见不可点、版本 chip 拦腰截断、标题逐词换行、seg 键逐字竖排。
+   载体选型：容器查询而非视口媒体查询——面板有还原居中/.abs 拖拽位/.full 全屏三形态，
+   视口宽 ≠ 面板宽（600px 视口→568px 面板仍溢出）；容器查询跟随面板实际宽度。面板宽高
+   均为 min(920px,100%)/min(680px,86vh) 公式派生、不依赖内容，inline-size 包含安全；
+   灯箱 portal 挂 body（0.9.73）、分类行 sticky 在 .dshm-body 滚动容器内，均不受祖先
+   inline-size 包含影响。断点：容器 600px（两行重排）与视口 600px（默认全屏判定 +
+   overlay 8px）同值。
+   兜底语义说明（共识 Q3 + 评审 R7）：「不支持容器查询的浏览器新规则零生效」按 CSS
+   条件规则组机制等效落地——.dshm-title-short 基础隐藏不依赖容器查询（老浏览器也要
+   生效）；其余新规则都是整块 at-rule（@supports/@container/@media 顶层兄弟），不支持
+   容器查询的浏览器对未知 at-rule 整块忽略，效果等同全部包进 @supports。不要机械再
+   嵌套一层。 */
+.dshm-title-short{display:none}
+/* 兜底：不支持容器查询的浏览器只生效本条——短标题隐藏，视觉与旧版逐字节一致 */
+@supports (container-type: inline-size) {
+  .dshm-panel{container-type:inline-size}
+}
+/* 两行重排：行1 [短标题 ⋯spacer⋯ chip winctl]，行2 [seg 拉通]。DOM 顺序不动
+  （title→divider→seg→spacer→chip→winctl），全靠 order+wrap——源锚/tab 序/读屏序
+  零扰动；视觉序与 DOM 序不一致（seg 在 DOM 前、视觉在后），面板内元素少可接受 */
+@container (max-width:600px){
+  .dshm-head{flex-wrap:wrap;row-gap:6px}
+  .dshm-head-divider{display:none}
+  .dshm-title-full{display:none}
+  .dshm-title-short{display:inline}
+  .dshm-spacer{order:1}
+  .dshm-head>.dshm-dshchip{order:2}
+  .dshm-winctl{order:3}
+  .dshm-winctl button{height:36px}
+  .dshm-seg{order:4;flex:1 1 100%}
+  .dshm-seg button{flex:1;justify-content:center;white-space:nowrap;padding:0 10px;height:36px}
+  /* 版本 chip（共识 Q7 + 评审 R5 收窄）：常态隐藏（设置页随时可见）；warn 态缩为 ⬆
+     icon——文字 span 全隐藏，tooltip 与点击自升级语义不变。规则以版本 chip 专属类
+     .dshm-verchip 收窄：头部另有 profile 徽标（span.dshm-dshchip，仅非 web profile
+     渲染），不在共识范围内，不得连带隐藏 */
+  .dshm-head>.dshm-verchip:not(.warn){display:none}
+  .dshm-verchip.warn .dshm-dshchip-name,.dshm-verchip.warn .dshm-dshchip-v,.dshm-verchip.warn .dshm-up-v{display:none}
+}
+/* overlay 窄视口兜底：还原态 8px（.full 的 padding:0 特异性 (0,2,0)>(0,1,0) 自然保持）；
+   窄视口默认全屏的 JS 判定在 MarketPanel full 初始化 */
+@media (max-width:600px){.dshm-overlay{padding:8px}}
 `;
 
 /** CSS 内容哈希（djb2）：bundle 更新 → 哈希变 → 旧样式自动替换（GUI 长驻页面热更自愈，0.7.8）。 */
@@ -3315,14 +3359,14 @@ function DshmVersionChip({ version, notify, initialCheck }) {
       "button",
       {
         type: "button",
-        className: "dshm-dshchip warn",
+        className: "dshm-dshchip dshm-verchip warn",
         title: lookup("selfupdate.available", { v: state.latest }),
         onClick: doUpgrade,
         disabled: busy,
       },
-      "dsh-m ",
+      h("span", { className: "dshm-dshchip-name" }, "dsh-m "),
       h("span", { className: "dshm-dshchip-v" }, `v${version}`),
-      busy ? h(Spin) : h("span", { className: "dshm-up" }, `⬆ v${state.latest}`),
+      busy ? h(Spin) : h("span", { className: "dshm-up" }, "⬆", h("span", { className: "dshm-up-v" }, ` v${state.latest}`)),
     );
   }
   const title = state.kind === "ahead" && state.latest
@@ -3330,8 +3374,8 @@ function DshmVersionChip({ version, notify, initialCheck }) {
     : `dsh-m v${version}`;
   return h(
     "span",
-    { className: "dshm-dshchip", title },
-    "dsh-m ",
+    { className: "dshm-dshchip dshm-verchip", title },
+    h("span", { className: "dshm-dshchip-name" }, "dsh-m "),
     h("span", { className: "dshm-dshchip-v" }, `v${version}`),
   );
 }
@@ -3385,6 +3429,11 @@ function MarketPanel({ onClose }) {
   const FS_KEY = "dshm-panel-fullscreen";
   const [full, setFull] = useState(() => {
     try {
+      // 窄视口（手机）恒全屏初始化（0.9.83 共识 Q9）：仅初始挂载判定一次、不随 resize
+      // 跟随（旋转后可手动 ⛶ 切换）；FS_KEY 记忆在窄视口下不生效——防「手动还原一次被
+      // 永久记住 361px 挤压态」。宽视口行为逐字节同今日（FS_KEY 照旧）。
+      // matchMedia 守卫与 FS_KEY 同款防御：SSR 无 window / jsdom 缺 matchMedia 安全回落。
+      if (typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 600px)").matches) return true;
       return typeof window !== "undefined" && window.localStorage ? window.localStorage.getItem(FS_KEY) === "1" : false;
     } catch {
       return false;
@@ -3800,7 +3849,10 @@ function MarketPanel({ onClose }) {
             e.preventDefault();
           },
         },
-        h("span", { className: "dshm-title" }, lookup("title.full")),
+        h("span", { className: "dshm-title" },
+          h("span", { className: "dshm-title-full" }, lookup("title.full")),
+          h("span", { className: "dshm-title-short" }, lookup("title.panel")),
+        ),
         h("span", { className: "dshm-head-divider", "aria-hidden": "true" }),
         h(
           "div",
