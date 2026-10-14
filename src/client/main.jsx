@@ -2710,7 +2710,7 @@ function configStatusLabel(status) {
   return lookup(`settings.status.${status || "loading"}` || "settings.status.loading");
 }
 
-function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onOpsClearFinished, onOpsRemove }) {
+function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onOpsClearFinished, onOpsRemove, version }) {
   const reg = useAsync((force) => api("registry", force ? { force: true } : {}), []);
   const cfgState = useAsync(() => api("registry-config"), []);
   const [busy, setBusy] = useState(false);
@@ -2951,8 +2951,11 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
         ? h("div", { className: "dshm-err" }, `${lookup("settings.remotehint")}：${state.errors.slice(0, 5).join("；")}`)
         : null,
     ),
-    // ③ 关于：当前定位 + 仓库/反馈链接（dsh-m 自身卡已按主人要求移除——升级走市场卡片/CLI，self-check/self-upgrade API 保留）
-    Section(lookup("settings.about"),
+    // ③ 关于：当前定位 + 仓库/反馈链接（dsh-m 自身卡已按主人要求移除——升级走市场卡片/CLI，self-check/self-upgrade API 保留）。
+    //    版本号挂标题行既有 sub 槽（0.9.84 主人真机反馈：窄容器头部 chip 常态隐藏后插件版本无处可查）——
+    //    零新增行/块/CSS/i18n；缺失（ping 失败 → null）时槽位自然为空，与头部 chip「失败不留占位」同语义；
+    //    不放升级入口——头部 ⬆ + 市场卡片/CLI 所有权不变（评审 E 轮对齐）。
+    Section(lookup("settings.about"), version ? `v${version}` : null,
       h("div", { className: "dshm-hint" }, lookup("settings.about.text")),
       h("div", { className: "dshm-links" },
         h(ExtLink, { href: "https://github.com/iasiv5/dsh-m" }, "GitHub"),
@@ -3905,6 +3908,7 @@ function MarketPanel({ onClose }) {
         tab === "installed" ? h(InstalledTab, { notify, installed, updates, onMutation: refreshViews, ops }) : null,
         tab === "settings" ? h(SettingsTab, {
           notify,
+          version: pluginVersion,
           onRegistryChanged,
           onForceMarket: () => marketReloadAll(true),
           opsRecords: opRecords,

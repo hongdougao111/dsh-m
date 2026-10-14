@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.84 优化：设置页「关于」标题行展示插件版本号
+
+- **问题（主人真机反馈）**：0.9.83 起窄容器下头部版本 chip 常态隐藏（共识 Q7——手机头部宽度让位给还原/关闭），插件自身版本号一度无处可查（设置页只有社区清单的「目录版本」）。
+- **方案（零视觉噪声）**：设置页「关于」卡标题行右侧既有 sub 槽（`.dshm-section-sub` 弱化灰字）挂裸版本号 `v{version}`——零新增行/块/CSS/i18n；`pluginVersion`（ping 单一事实源：挂载/回前台/重启确认后重取）以 prop 接入 SettingsTab，缺失（ping 失败 → null）时槽位自然为空（Section 兼容逻辑天然处理，与头部 chip「失败不留占位」同语义）；不放升级入口——头部 ⬆ + 市场卡片/CLI 所有权不变（尊重「dsh-m 自身卡已移除」裁决）。
+- **验证**：1442 项测试全绿（0.9.83 基线 1440 + 新增源锚 2 组于 client-about-version.test.mjs）、typecheck 零错误。
+
 ### 0.9.83 功能：手机窄屏自适应——面板头部两行重排 + 窄视口默认全屏
 
 - **问题（主人手机实拍）**：`.dshm-head` 是单行 no-wrap flex，最小内容宽 ~440-470px，手机面板内容宽仅 330-365px → 行尾溢出被 `.dshm-panel` overflow:hidden 裁掉：还原/关闭按钮组不可见不可点（关面板只剩遮罩点击）、版本 chip 拦腰截断、标题逐词换行、seg 键逐字竖排。移动端问题第三次以「用户手机截图反馈」方式暴露（0.9.66 触屏滑动方向、0.9.67 字号失控之后）。
@@ -590,6 +596,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### 0.9.84 Enhancement — plugin version shown on the Settings "About" title row
+
+- **Problem (owner's real-device feedback)**: since 0.9.83 the head version chip stays hidden in its idle state on narrow containers (consensus Q7 — phone head width goes to the restore/close buttons), leaving the plugin's own version nowhere to check (the settings page only had the community catalog's 目录版本).
+- **Fix (zero visual noise)**: the "About" card's title row reuses its existing `sub` slot (`.dshm-section-sub`, muted small text on the right) to show the bare `v{version}` — zero new rows/blocks/CSS/i18n; `pluginVersion` (ping single source of truth: mount / foreground-return / post-restart re-check) reaches SettingsTab as a prop, and a missing version (ping failure → null) leaves the slot naturally empty (Section's compat logic handles it — same "no placeholder on failure" semantics as the head chip); no upgrade entry here — the head ⬆ plus marketplace card/CLI keep that ownership (respecting the removed dsh-m self card ruling).
+- **Verification**: 1442 tests green (0.9.83 baseline 1440 + 2 new source-anchor groups in client-about-version.test.mjs), typecheck clean.
 
 ### 0.9.83 Feature — mobile adaptive layout: two-row panel head + fullscreen-by-default on narrow viewports
 
