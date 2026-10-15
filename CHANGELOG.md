@@ -8,6 +8,14 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.88 特性：面板三区 resize——尺寸记忆 + 就地生长（ADR-0021）+ 验收三修
+
+- **需求（2026-10-15）**：市场面板「920px 浏览卡片太挤、全屏又太大」的真实档位空洞 + 桌面窗口本能手势（下意识移向边缘想 resize）。`/grill-with-docs` 两轮锁定设计：三区手柄（右/下/右下角）、就地生长锚定、尺寸记忆全套；实施计划经独立评审 Agent 三轮对抗审核（计划 11 条 + 执行 2 条全闭环，含两条方法论沉淀：`treeShaking:false` 下「bundle 标识符缺席」类预言必假、esbuild 默认 charset=ascii 下中文 bundle 锚必假）。
+- **方案（ADR-0021）**：① 纯逻辑 `window-resize.js`——`clampSize`（下限 640×460、视口−8px 边距、`.abs` 形态 origin 第二钳保右/下缘不破边距、视口小于下限退化）+ 尺寸记忆存取（与位置记忆逐字对称）；② 手势状态机逐条镜像 ADR-0017（rAF 帧内写/手势帧零 setState/setPointerCapture/主键门卫/多指守卫/卸载清理）；③ 热区 6/8px 边 + 14×14 角，cursor 即全部供性，全屏/窄视口/触摸四重豁免；④ reclamp 升维：先夹尺寸、后夹位置。
+- **主人实测三修（同版）**：头部两行重排断点 600→720（resize min 640 落入两行区，标题/seg 零折行）；详情弹窗中段包进 `modalbody`（README 任意展开后 ✕ 与「安装」双端常驻）；设置网格三列门控由 `.full` 改容器宽 ≥1100（还原态拉宽同样升三列，顺带修正小视口全屏强塞三列旧账）。
+- **实验记录**：tab 切换淡入当日实现当日被主人否决，整体回滚（字节级干净，评审复核在案）。
+- **验证**：全量 1496 测试（+24：纯逻辑 18 + 冒烟 3 + 三修源锚 3）、typecheck 零错误；CDP 量化矩阵 14 格全过（列数阈值 640→1/920→2/1140→3/1500→4、钳位下限 640×460 与上限、视口缩小双夹紧、720 断点、modalbody、coarse 豁免）；Performance CDP 实测与 Windows 壳冒烟按计划延后（前者有代码级保证：手势帧零 setState）。验收记录（诚实口径）：dsh-workspace `01_docs/research/2026-10-15-dshm-panel-resize-sweep-record.md`。
+
 ### 0.9.87 性能：热路径四连——已装枚举并行化 + patchRows 按需采集 + 收藏 stale 批量化 + 设置页社区 summary 接入 L2
 
 - **问题（2026-10-15 架构走查 + 独立复核）**：市场查询热路径上仍有三处重复支付——① `listInstalledPlugins` 逐依赖**串行**双文件读（package.json + cordis.patch.yml），每次查询/翻页/每次防抖搜索提交都全量重跑（14 依赖实测 ~11ms，占暖缓存查询近半预算）；② 收藏分区 stale 检测对**每个收藏发一整条 market 查询**（≤8 并发扇出）：回答一个布尔值却付全管线（枚举+社区+4445 条评分+排序+分页），20 收藏 ≈ 3 批 × 全管线；且旧路径存在 curatedFirst 挤出边界误判——primary 域同词命中 ≥8 条时 id-exact 社区条目被前置挤出前 8，**误判 stale**；③ 设置页 registry 方法背后的 `getCommunitySummary` 走无 memo 的全量 adapt+merge（~4400 条，每次打开 ~10-50ms CPU），而同身份的 L2 物化代（ADR-0016）近在咫尺。
@@ -614,6 +622,14 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Feature in 0.9.88 — three-zone panel resize: size memory + grow-in-place (ADR-0021) + acceptance fixes
+
+- **Need (2026-10-15)**: a real gap between "cramped at 920px" and "overkill fullscreen", plus the instinctive desktop gesture of grabbing window edges. Design locked via two grill rounds: three handles (right/bottom/bottom-right), grow-in-place anchoring, full size memory; the implementation plan survived three independent adversarial review rounds (11 plan + 2 execution issues all closed, including two methodology findings: bundle-absence predictions are structurally false under `treeShaking:false`, and CJK bundle anchors are false under esbuild's default ascii charset).
+- **Approach (ADR-0021)**: ① DOM-free `window-resize.js` — `clampSize` (min 640×460, viewport−8px margins, an origin second clamp keeping right/bottom edges inside margins for the freely-positioned form, degraded bounds on tiny viewports) + size-memory storage symmetric to position memory; ② gesture state machine mirrors ADR-0017 (rAF-batched writes, zero setState in gesture frames, setPointerCapture, primary-button guard, multi-pointer guard, unmount cleanup); ③ hot zones 6/8px edges + 14×14 corner, cursor-only affordance, four exemptions (fullscreen / narrow viewport / touch / scrollbar trade-off); ④ reclamp upgraded to size-first-then-position.
+- **Acceptance fixes from live testing (same release)**: head two-row breakpoint 600→720 (min-width 640 no longer crushes the title); detail modal middle wrapped in `modalbody` (✕ and Install stay pinned however far the README expands); settings 3-column gate switched from `.full` to container ≥1100px (a widened restored panel now gets three columns too).
+- **Experiment record**: a tab-switch fade was implemented and rejected by the owner the same day, fully reverted (byte-identical, reviewer-verified).
+- **Verification**: 1496 tests green (+24), typecheck clean; CDP quantified matrix 14/14 cells passed (column thresholds 640→1/920→2/1140→3/1500→4, lower/upper clamping, dual reclamp on viewport shrink, 720 breakpoint, modalbody, coarse-pointer exemption); Performance CDP measurement and Windows shell smoke deferred per plan (the former backed by a code-level guarantee: zero setState in gesture frames). Honest acceptance record: dsh-workspace `01_docs/research/2026-10-15-dshm-panel-resize-sweep-record.md`.
 
 ### Performance in 0.9.87 — hot-path quartet: parallel installed enumeration, on-demand patchRows, batched favorites stale check, settings community summary via L2
 
