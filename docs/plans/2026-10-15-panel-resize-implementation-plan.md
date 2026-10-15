@@ -521,3 +521,13 @@
 ## 审阅 Checkpoint
 
 - 计划正文到此为止。请审阅；批准前不进入实现。批准后默认由编码 agent（本会话）按任务顺序执行。
+
+## T7 增补（2026-10-15 主人实测三修，commit 513005c）
+
+主人真机扫宽反馈三项，当日分析→拍板→修复（均 panel resize 伴生/暴露）：
+
+1. **头部两行重排断点 600→720px**：min 640 落在旧 600 断点的 601–720 死区，长标题/seg 文字折行。容器断点与视口断点自此解耦；`.dshm-title` 与 `.dshm-seg button` 基础补 nowrap/ellipsis 防御带。视口 600px 判定与 overlay 8px 不动。
+2. **详情弹窗 modalbody 结构化**：box 整体滚动（`overflow:auto`）改 `hidden`，中段包进 `.dsvm-modalbody{overflow:auto;min-height:0;overscroll-behavior:contain}`——✕ 与「安装」双端常驻，README 任意展开关得上、装得了。
+3. **设置网格三列门控改容器宽**：`@container (min-width:1100px)` 取代 `.dshm-panel.full` 门控（resize 后还原态可达任意宽，全屏与否不再是宽度信号）；≤760px 视口单列保留；顺带修正小视口全屏被强塞三列的旧账。
+
+**验收增补行**（并入下方矩阵口径）：① 640 宽面板头部两行（短标题 + tab 拉通）、无文字折行；② 详情 Modal 展开 README 后 ✕ 与「安装」可见可点，中段独立滚动；③ 还原态拉宽 ≥1100 设置页三列（关于升右列），全屏 ≥1100 同样三列，窄全屏回落两列。
