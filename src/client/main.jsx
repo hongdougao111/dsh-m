@@ -17,6 +17,7 @@ const { backdropCloseHandlers } = require("./backdrop.js");
 const { lbStep, lbNeighbors, swipeDir } = require("./lightbox.js");
 const { shotWheelAction } = require("./wheel-strip.js");
 const { dragSlop, grabOffset, titlebarTopInset, clampPoint, loadPanelPos, savePanelPos, isDragTarget } = require("./window-drag.js");
+const { clampSize, loadPanelSize, savePanelSize } = require("./window-resize.js");
 const { WESERV_TIMEOUT_MS, weservUrl, serviceBucketOf, tierOrder, nextTier, needsTimeout, preferredTier, rememberSuccess } = require("./img-chain.js");
 const { createMarkdown } = require("./markdown.js");
 const { ExtLink, MdImg, renderMarkdown } = createMarkdown(h);
@@ -95,7 +96,7 @@ const ZH = {
   "settings.warnings": "维护提示",
   "notice.unavailable": "收录清单不可用 · 请到设置页检查地址",
   "pager.jump": "跳转", "pager.jump.ph": "页号",
-  "panel.fullscreen": "全屏", "panel.restore": "还原", "panel.dragHint": "拖拽移动 · 双击切换全屏",
+  "panel.fullscreen": "全屏", "panel.restore": "还原", "panel.dragHint": "拖拽移动 · 双击全屏 · 拖边角调大小",
   "lb.title": "插件截图预览", "lb.prev": "上一张（←）", "lb.next": "下一张（→）", "lb.hint": "点图或空白处关闭 · ←→ 切换", "lb.fail": "图片加载失败", "lb.retry": "重试", "lb.open": "打开原图",
   "filter.title": "筛选", "filter.sortfield": "排序字段", "filter.sortdir": "排列方向", "filter.pagesize": "每页条数",
   "filter.field.downloads": "npm 下载量（近 30 天）", "filter.field.stars": "Star 数", "filter.field.added": "收录日期",
@@ -216,7 +217,7 @@ const EN = {
   "settings.warnings": "Maintenance notice",
   "notice.unavailable": "Registry unavailable · check the address in Settings",
   "pager.jump": "Go", "pager.jump.ph": "Page",
-  "panel.fullscreen": "Fullscreen", "panel.restore": "Restore", "panel.dragHint": "Drag to move · Double-click to toggle fullscreen",
+  "panel.fullscreen": "Fullscreen", "panel.restore": "Restore", "panel.dragHint": "Drag to move · Double-click to fullscreen · Drag edges to resize",
   "lb.title": "Plugin screenshot preview", "lb.prev": "Previous (←)", "lb.next": "Next (→)", "lb.hint": "Click image or backdrop to close · ←→ to switch", "lb.fail": "Failed to load image", "lb.retry": "Retry", "lb.open": "Open original",
   "filter.title": "Filter", "filter.sortfield": "Sort by", "filter.sortdir": "Direction", "filter.pagesize": "Per page",
   "filter.field.downloads": "npm downloads (30-day)", "filter.field.stars": "Stars", "filter.field.added": "Date added",
@@ -3482,6 +3483,16 @@ function MarketPanel({ onClose }) {
       return null;
     }
   });
+  // 尺寸记忆（panel resize）：{w,h} = 还原态面板宽高 px；null = 无记录 → 类默认
+  // min(920px,100%)·min(680px,86vh)，渲染零差异。resizingRef 供 reclamp 与手势机
+  // 互斥（同 draggingRef 语义，T3 置位/T4 消费）。
+  const [size, setSize] = useState(() => {
+    try {
+      return loadPanelSize(typeof window !== "undefined" && window.localStorage ? window.localStorage : null);
+    } catch {
+      return null;
+    }
+  });
   // latest-ref 镜像用 render 期赋值（计划规格原文）：同一 commit 内 layout effect 与事件处理器
   // 读到的恒为本次 render 的值。禁改 useEffect 同步——全屏→还原 commit 上 layout 的 reclamp
   // 会先于 passive 同步执行，读到旧 fullRef=true 被守卫静默跳过（评审 E1-1 实证复现）。
@@ -3489,6 +3500,9 @@ function MarketPanel({ onClose }) {
   fullRef.current = full;
   const posRef = useRef(pos);
   posRef.current = pos;
+  const sizeRef = useRef(size);
+  sizeRef.current = size; // render 期赋值（latest-ref，同 posRef/fullRef 先例；T4 reclamp 禁同 tick 读它）
+  const resizingRef = useRef(false);
   // 重夹紧：还原态渲染后（挂载/全屏往返）与窗口 resize 时，把记忆位置收回当前视口 + titlebar
   // 带内；全屏态与拖拽中跳过（拖拽帧有实时 clamp，全屏无位置语义）。
   const reclamp = useCallback(() => {
@@ -3845,7 +3859,14 @@ function MarketPanel({ onClose }) {
       "div",
       {
         className: ["dshm-panel", full && "full", !full && pos && "abs"].filter(Boolean).join(" "),
-        style: !full && pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined,
+        // panel resize：尺寸记忆以 inline 宽高覆盖类默认 min(920px,100%)·min(680px,86vh)；
+        // 与位置记忆互不诱发（就地生长：居中形态只带 width/height 仍由 flex 居中）
+        style: !full
+          ? {
+              ...(pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : {}),
+              ...(size ? { width: `${size.w}px`, height: `${size.h}px` } : {}),
+            }
+          : undefined,
         ref: panelRef,
         onClick: (e) => e.stopPropagation(),
       },
@@ -3969,6 +3990,12 @@ function MarketPanel({ onClose }) {
               banner ? h(RestartBanner, { note: banner.text, onDone: () => setBanner(null), desktop: banner.desktop === true, onRestarted: reloadPing }) : null,
             )
           : null,
+        // resize 热区（panel resize）：透明无视觉；pointer-only 供性（aria-hidden）。
+        // 全屏态不渲染（Task 5 CSS @media pointer:coarse 与 .full belt 另有双保险）；
+        // data-dshm-resize 供 T3 手势机 closest 门卫。
+        !full && h("div", { className: "dshm-rz rz-e", "data-dshm-resize": "e", "aria-hidden": "true" }),
+        !full && h("div", { className: "dshm-rz rz-s", "data-dshm-resize": "s", "aria-hidden": "true" }),
+        !full && h("div", { className: "dshm-rz rz-se", "data-dshm-resize": "se", "aria-hidden": "true" }),
     ),
   );
 }

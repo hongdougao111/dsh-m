@@ -399,3 +399,45 @@ describe('0.9.85 头部自升级入本地操作泵（源码断言）——主人
     assert.ok(src.includes('h(DshmVersionChip, { version: pluginVersion, notify, ops })'), 'ops 接线头部 chip 在（SSR/探针无 ops 时回退直连 api）')
   })
 })
+
+describe('panel resize 渲染接线（T2）——三手柄 restore 在/full 无 + 尺寸记忆进 inline 宽高', () => {
+  it('还原态渲染三手柄（data-dshm-resize=e|s|se 各恰一次，aria-hidden）', () => {
+    const html = renderToString(h(components.__MarketPanel, { onClose: () => {} }))
+    for (const zone of ['e', 's', 'se']) {
+      const n = html.split(`data-dshm-resize="${zone}"`).length - 1
+      assert.equal(n, 1, `手柄 ${zone} 应恰出现 1 次，实际 ${n}`)
+    }
+    assert.ok(html.includes('dshm-rz rz-se'), '右下角手柄类名在')
+  })
+
+  it('全屏态不渲染手柄（窄视口桩命中强制全屏初始化；key 定向桩评审 R1-7②）', () => {
+    globalThis.window = {
+      matchMedia: () => ({ matches: true }),
+      localStorage: { getItem: (k) => (k === 'dshm-panel-fullscreen' ? '1' : null) },
+    }
+    try {
+      const html = renderToString(h(components.__MarketPanel, { onClose: () => {} }))
+      const n = html.split('data-dshm-resize=').length - 1
+      assert.equal(n, 0, `全屏态手柄应为 0，实际 ${n}`)
+      assert.ok(html.includes('dshm-panel full'), '全屏类名在（桩生效佐证）')
+    } finally {
+      delete globalThis.window
+    }
+  })
+
+  it('尺寸记忆注入 inline 宽高；无记忆时不产生内联 width', () => {
+    globalThis.window = {
+      matchMedia: () => ({ matches: false }),
+      localStorage: { getItem: (k) => (k === 'dshm-panel-size' ? JSON.stringify({ w: 1200, h: 800 }) : null) },
+    }
+    try {
+      const html = renderToString(h(components.__MarketPanel, { onClose: () => {} }))
+      assert.ok(html.includes('width:1200px'), `size.w 应进 inline style，实际无 width:1200px`)
+      assert.ok(html.includes('height:800px'), 'size.h 应进 inline style')
+    } finally {
+      delete globalThis.window
+    }
+    const bare = renderToString(h(components.__MarketPanel, { onClose: () => {} }))
+    assert.ok(!bare.includes('width:1200px'), '无记忆渲染不得出现 1200 内联宽')
+  })
+})
