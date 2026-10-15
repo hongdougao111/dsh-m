@@ -91,7 +91,7 @@ export function matchInstalledByEntry(entry: Pick<RegistryEntry, 'npm' | 'github
     if (entry.npm && it.pkg === entry.npm) return true
     if (entry.npm && it.name === entry.npm) return true
     if (entry.github && it.source === 'github') {
-      const m = /^github:([^#]+)/.exec(it.spec)
+      const m = GITHUB_SPEC_RE.exec(it.spec)
       if (m && m[1] === entry.github) return true
     }
     return false
@@ -272,7 +272,8 @@ function buildMatchIndex(domain: Array<RegistryEntry | CommunityEntry>): MatchIn
   return { byNpm, byGithub, byId }
 }
 
-const GITHUB_SPEC_RE = /^github:([^#]+)/
+/** github spec 的 owner/repo 提取（matchInstalledByEntry 与 market.ts 已装索引共用单一事实源；2026-10-15 导出）。 */
+export const GITHUB_SPEC_RE = /^github:([^#]+)/
 
 /** 三候选（npm[pkg] / npm[name] / github[spec]（仅 source==='github'））取域序最前者胜——与 matchInstalledByEntry 逐点等价。 */
 function lookupInIndex(index: MatchIndex, installed: InstalledPlugin): RegistryEntry | CommunityEntry | undefined {

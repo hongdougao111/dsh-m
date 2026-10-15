@@ -193,41 +193,49 @@ function sanitizePkgJson(raw: PkgJson, fallbackName: string): Omit<InstalledPlug
   }
 }
 
-/** 枚举 web profile 已安装插件（只读）。complete:false 时 items/others 为 partial 结果（已确认部分保留）。 */
-export async function listInstalledPlugins(profileDir: string = webProfileDir()): Promise<InstalledPluginsResult> {
-  const root = resolve(profileDir)
-  const result = await readProfileDepsResult(root)
-  let complete = result.complete
-  const deps = result.deps
-  const items: InstalledPlugin[] = []
-  let others = 0
-  for (const pkg of Object.keys(deps).sort()) {
-    const spec = deps[pkg]
-    const dir = resolvePluginDir(root, pkg, spec)
-    if (!dir) {
-      // 依赖键不安全、目录无法解析 → 无法判断（不冒充非 DSH）
-      complete = false
-      continue
+/**
+ * 单依赖分类（并行化重构 2026-10-15）：完整搬运原串行循环体的判定顺序——
+ * 目录解析失败 / package.json 读不到/坏 JSON/根非对象 → 'unknown'（无法判断 ≠ 非 DSH）；
+ * 合法 manifest 无 dsh 字段 → 'other'；否则（wantPatch 时读补丁层）组装 InstalledPlugin → { item }。
+ * 吞错边界：readPkgJsonResult / readBundlePatchRows 全程吞错，readTextLimited 吞 open 失败；
+ * 其 fh.read 阶段的异常（如 EIO）不被吞、沿 Promise.all 整体传播——与旧串行版循环体内
+ * 同样整体 reject 的语义等价（句柄在 finally 关闭，纯读无副作用）。
+ */
+type DepClassification = 'unknown' | 'other' | { item: InstalledPlugin }
+
+async function classifyDep(root: string, pkg: string, spec: string, wantPatch: boolean): Promise<DepClassification> {
+  const dir = resolvePluginDir(root, pkg, spec)
+  if (!dir) return 'unknown'
+  const rawResult = await readPkgJsonResult(dir)
+  if (!rawResult.ok) return 'unknown'
+  const raw = rawResult.value as PkgJson
+  if (!('dsh' in raw)) return 'other'
+  const info = sanitizePkgJson(raw, pkg)
+  // 包内补丁层行枚举（开关粒度判定原料）：缺失 → readable:false（按多行 → Bundle 级处理）。
+  // wantPatch=false（市场查询热路径）省略 patchRows 字段——不伪造 readable:false（那是
+  // 「多行插件」的语义谎报）；消费方（enablement/toggle，listInstalledWithMeta 路径）全程 ?. 链。
+  if (!wantPatch) {
+    return {
+      item: {
+        pkg,
+        name: info.name,
+        version: info.version,
+        description: info.description,
+        homepage: info.homepage,
+        spec,
+        source: parseSpecSource(spec),
+        dsh: true,
+        path: dir,
+        githubRepo: info.githubRepo,
+      },
     }
-    const rawResult = await readPkgJsonResult(dir)
-    if (!rawResult.ok) {
-      // package.json 缺失/不可读/坏 JSON/根非对象 → 无法判断
-      complete = false
-      continue
-    }
-    const raw = rawResult.value as PkgJson
-    if (!('dsh' in raw)) {
-      // 确认非 DSH 依赖
-      others += 1
-      continue
-    }
-    const info = sanitizePkgJson(raw, pkg)
-    // 包内补丁层行枚举（开关粒度判定原料）：缺失 → readable:false（按多行 → Bundle 级处理）
-    const patchText = await readTextLimited(join(dir, 'cordis.patch.yml'), PATCH_MAX_BYTES)
-    const patchRows = patchText
-      ? readBundlePatchRows(patchText.text)
-      : { inserts: [], configRows: 0, readable: false }
-    items.push({
+  }
+  const patchText = await readTextLimited(join(dir, 'cordis.patch.yml'), PATCH_MAX_BYTES)
+  const patchRows = patchText
+    ? readBundlePatchRows(patchText.text)
+    : { inserts: [], configRows: 0, readable: false }
+  return {
+    item: {
       pkg,
       name: info.name,
       version: info.version,
@@ -237,9 +245,41 @@ export async function listInstalledPlugins(profileDir: string = webProfileDir())
       source: parseSpecSource(spec),
       dsh: true,
       path: dir,
-      githubRepo: githubRepoFromRepository(raw.repository),
+      githubRepo: info.githubRepo,
       patchRows,
-    })
+    },
+  }
+}
+
+/**
+ * 枚举 web profile 已安装插件（只读）。complete:false 时 items/others 为 partial 结果（已确认部分保留）。
+ * opts.patchRows=false：跳过每插件的 cordis.patch.yml 读取与 YAML 解析（热路径省 ~0.55ms/插件），
+ * 产出的 item 不带 patchRows 字段——仅供不需要开关粒度原料的调用方（市场查询）使用。
+ */
+export async function listInstalledPlugins(
+  profileDir: string = webProfileDir(),
+  opts?: { patchRows?: boolean },
+): Promise<InstalledPluginsResult> {
+  const root = resolve(profileDir)
+  const result = await readProfileDepsResult(root)
+  let complete = result.complete
+  const deps = result.deps
+  const wantPatch = opts?.patchRows !== false
+  // 每依赖文件读并发执行（原串行 for-await 是热路径上每次市场查询都重复支付的一半预算，
+  // 14 依赖实测 IO 串行 ~11ms → 并行 ~2.5ms）；Promise.all 保序，输出仍按依赖键字典序。
+  const keys = Object.keys(deps).sort()
+  const classified = await Promise.all(keys.map((pkg) => classifyDep(root, pkg, deps[pkg], wantPatch)))
+  const items: InstalledPlugin[] = []
+  let others = 0
+  for (const c of classified) {
+    if (c === 'unknown') {
+      // 依赖键不安全、目录无法解析、package.json 缺失/不可读/坏 JSON → 无法判断（不冒充非 DSH）
+      complete = false
+    } else if (c === 'other') {
+      others += 1
+    } else {
+      items.push(c.item)
+    }
   }
   return { items, others, complete, profileDir: root }
 }

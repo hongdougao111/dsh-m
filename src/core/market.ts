@@ -49,6 +49,7 @@ import {
   isCommunityEntry,
   matchInstalledByEntry,
   mergedOutcome,
+  GITHUB_SPEC_RE,
   type CommunityRegistrySummary,
   type MergedOutcome,
 } from './merged-market.js'
@@ -447,9 +448,60 @@ function sortEntries(
   })
 }
 
+// ---------- 已装索引（FP5 2026-10-15：toMarketItem 逐页线性扫描 → 每查询一次 O(1) 查表） ----------
+
+interface OrdInst {
+  inst: InstalledPlugin
+  ord: number
+}
+
+/** 三域 first-wins 索引：与 matchInstalledByEntry 逐点等价（论证同 ADR-0016 决策 5 lookupInIndex——数组序中首个命中任一准则者 = 三域首现 + 跨域取 ord 最小）。 */
+interface InstalledIndex {
+  byPkg: Map<string, OrdInst>
+  byName: Map<string, OrdInst>
+  byGithub: Map<string, OrdInst>
+}
+
+function buildInstalledIndex(installedItems: InstalledPlugin[]): InstalledIndex {
+  const byPkg = new Map<string, OrdInst>()
+  const byName = new Map<string, OrdInst>()
+  const byGithub = new Map<string, OrdInst>()
+  installedItems.forEach((inst, ord) => {
+    const slot = { inst, ord }
+    if (!byPkg.has(inst.pkg)) byPkg.set(inst.pkg, slot)
+    if (!byName.has(inst.name)) byName.set(inst.name, slot)
+    if (inst.source === 'github') {
+      const m = GITHUB_SPEC_RE.exec(inst.spec)
+      if (m && !byGithub.has(m[1])) byGithub.set(m[1], slot)
+    }
+  })
+  return { byPkg, byName, byGithub }
+}
+
+/** 三候选（byPkg[npm] / byName[npm] / byGithub[github]，truthiness 守卫与旧谓词一致）取 ord 最小者胜。 */
+function lookupInstalledByIndex(index: InstalledIndex, entry: Pick<RegistryEntry, 'npm' | 'github'>): InstalledPlugin | undefined {
+  const candidates: OrdInst[] = []
+  if (entry.npm) {
+    const byPkg = index.byPkg.get(entry.npm)
+    if (byPkg) candidates.push(byPkg)
+    const byName = index.byName.get(entry.npm)
+    if (byName) candidates.push(byName)
+  }
+  if (entry.github) {
+    const byRepo = index.byGithub.get(entry.github)
+    if (byRepo) candidates.push(byRepo)
+  }
+  if (candidates.length === 0) return undefined
+  let best = candidates[0]
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i].ord < best.ord) best = candidates[i]
+  }
+  return best.inst
+}
+
 /** 合并条目 → MarketItem：社区条目带 community 标记与旁路字段。 */
-function toMarketItem(entry: RegistryEntry | CommunityEntry, installedItems: InstalledPlugin[]): MarketItem {
-  const inst = matchInstalledByEntry(entry, installedItems)
+function toMarketItem(entry: RegistryEntry | CommunityEntry, installedIndex: InstalledIndex): MarketItem {
+  const inst = lookupInstalledByIndex(installedIndex, entry)
   const item: MarketItem = { ...entry, installed: Boolean(inst), outdated: false }
   if (inst) {
     item.installedPkg = inst.pkg
@@ -509,7 +561,7 @@ export async function listMarket(
 
   const registryTask = d.loadRegistry(cfg, { namespace, signal, force: opts.force, deadlineMs, profile: opts.profile })
   const installedTask: Promise<Awaited<ReturnType<MarketDeps['listInstalledPlugins']>> | null> =
-    d.listInstalledPlugins(opts.profileDir).catch(() => null)
+    d.listInstalledPlugins(opts.profileDir, { patchRows: false }).catch(() => null)
   // 社区 flight 并发启动（source=primary 零调用；0.7.0 Task 7：primaryOnly 字段已删除）；共享 loader 不接收调用者 deadline——
   // listMarket 作为 waiter 在 communityOutcome 内 race 自己的剩余 deadline/signal（v10 契约）
   const communityTask =
@@ -617,7 +669,9 @@ export async function listMarket(
   let offset = normalizeOffset(opts.offset)
   if (total > 0 && offset >= total) offset = Math.floor((total - 1) / limit) * limit
 
-  const items: MarketItem[] = ordered.slice(offset, offset + limit).map((entry) => toMarketItem(entry, installedItems))
+  // 0.9.68（ADR-0016 决策 5 同款思路，FP5 2026-10-15）：已装索引每查询建一次，页内条目 O(1) 查表
+  const installedIndex = buildInstalledIndex(installedItems)
+  const items: MarketItem[] = ordered.slice(offset, offset + limit).map((entry) => toMarketItem(entry, installedIndex))
 
   let latestComplete = true
   let latestTimedOut = false
@@ -714,6 +768,80 @@ export async function listMarket(
     latestTimedOut,
     community: community.summary,
   }
+}
+
+// ---------- 批量 id 存在性（FP2 2026-10-15：收藏 stale 检测批量化） ----------
+
+export interface ExistingMarketIdsOptions {
+  namespace?: RegistryCacheNamespace
+  profile?: string
+  signal?: AbortSignal
+  force?: boolean
+  deadlineMs?: number
+}
+
+/**
+ * 批量 id 存在性（收藏 stale 检测专用，FP2）：一次装载 registry+社区、经物化合并市场（L2，
+ * 同身份与 listMarket 共享代）对 **merged 域**（主清单 + 存活社区条目，不含 displaced——与
+ * 今日 source:'all' 搜索域一致）建原始 id Set，按输入序过滤返回。
+ *
+ * 三不原则（与 listMarket 的接口差异，也是性能来源）：不枚举已装、不探测 latest、不分页。
+ *
+ * 语义对照（旧路径 = 逐收藏 `market {query:id, source:'all', limit:8, probeMode:'cache-only'}`
+ * + items.some(id)）：除一处自觉差异外逐点一致——**curatedFirst 挤出边界**：旧搜索页路径在
+ * primary 域同字段全词命中 ≥limit 条时会把 id-exact 的社区条目挤出前 8（误判 stale），本接口
+ * 的 Set 判定在该边界判 live（=「已从目录消失」的正确语义），属修复而非回归，勿改回搜索页行为。
+ *
+ * 失败语义：registry 装载 reject → 原样抛出（host-api 统一 500 → 客户端 catch 空 Set 全 stale，
+ * 与今日 market 同路径等价）；deadline 逃逸 → `{ present: [] }`（同今日超时空页 → 全 stale）；
+ * 社区 unavailable/disabled → merged=primary-only → 社区收藏判 stale（同今日）。
+ */
+export async function existingMarketIds(
+  ids: string[],
+  cfg: RegistryConfig = {},
+  opts: ExistingMarketIdsOptions = {},
+  deps?: Partial<Pick<MarketDeps, 'loadRegistry' | 'fetchCommunityCatalog'>>,
+): Promise<{ present: string[] }> {
+  const list = Array.isArray(ids) ? ids : []
+  if (list.length === 0) return { present: [] }
+  const d: Pick<MarketDeps, 'loadRegistry' | 'fetchCommunityCatalog'> = {
+    loadRegistry: deps?.loadRegistry ?? defaultLoadRegistry,
+    fetchCommunityCatalog: deps?.fetchCommunityCatalog ?? defaultFetchCommunityCatalog,
+  }
+  const deadlineMs = typeof opts.deadlineMs === 'number' && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0
+    ? opts.deadlineMs
+    : DEFAULT_DEADLINE_MS
+  const deadlineAt = Date.now() + deadlineMs
+  const namespace = opts.namespace ?? 'host'
+  const signal = opts.signal
+
+  const registryTask = d.loadRegistry(cfg, { namespace, signal, force: opts.force, deadlineMs, profile: opts.profile })
+  const communityTask = d.fetchCommunityCatalog(cfg, { namespace, signal, force: opts.force, profile: opts.profile })
+
+  let loaded: LoadedRegistry | 'deadline'
+  try {
+    loaded = await deadlineRace(registryTask, deadlineAt - Date.now())
+  } catch (err) {
+    void communityTask.catch(() => undefined)
+    throw err
+  }
+  if (loaded === 'deadline') {
+    void communityTask.catch(() => undefined)
+    return { present: [] }
+  }
+  const community = await mergedOutcome({
+    namespace,
+    profile: opts.profile ?? WEB_PROFILE,
+    cfg,
+    registry: loaded,
+    communityTask,
+    deadlineAt,
+  })
+  const knownIds = new Set(community.merged.map((entry) => entry.id))
+  const present = list
+    .map((id) => (typeof id === 'string' ? id.trim() : ''))
+    .filter((id) => id !== '' && knownIds.has(id))
+  return { present }
 }
 
 // ---------- 已装列表 ----------

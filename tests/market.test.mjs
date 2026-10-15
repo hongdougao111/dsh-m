@@ -9,10 +9,10 @@ import { writeFileSync, readFileSync, rmSync, mkdtempSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { listMarket, listInstalledWithMeta, installFromRegistry, upgradePlugin, uninstallPlugin, communityOutcome, capturePreMutationState, derivePrior } from '../lib/core/market.js'
+import { listMarket, listInstalledWithMeta, installFromRegistry, upgradePlugin, uninstallPlugin, communityOutcome, capturePreMutationState, derivePrior, existingMarketIds } from '../lib/core/market.js'
 import { IncompatibleError } from '../lib/core/compat-check.js'
 import { latestCacheKey, readLatestCache, writeLatestCache, resetLatestCacheForTest } from '../lib/core/latest-cache.js'
-import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
+import { _resetMergedMarketForTests, _mergedMarketStatsForTests } from '../lib/core/merged-market.js'
 // R1-1：L2 物化代跨用例隔离（fixture 假身份可能同键；node --test 文件内共享模块状态）
 beforeEach(() => _resetMergedMarketForTests())
 
@@ -253,6 +253,90 @@ describe('namespace 传递', () => {
     assert.equal(calls.loadRegistry[0]?.namespace, 'host')
     await listMarket(cfg, { namespace: 'cli' }, deps)
     assert.equal(calls.loadRegistry[1]?.namespace, 'cli')
+  })
+})
+
+describe('listMarket：installed 匹配索引等价（FP5 2026-10-15，钉住与 matchInstalledByEntry 逐点一致）', () => {
+  // 数组序即语义契约：name 域序 0（x-pkg）必须压过 pkg 域序 1（alpha）
+  const installed = {
+    items: [
+      { pkg: 'x-pkg', name: 'alpha', version: '1.0.0', description: '', homepage: '', spec: '^1.0.0', source: 'npm', dsh: true, path: '/tmp/x-pkg' },
+      { pkg: 'alpha', name: 'z-name', version: '2.0.0', description: '', homepage: '', spec: '^2.0.0', source: 'npm', dsh: true, path: '/tmp/alpha' },
+      { pkg: 'gh-plugin', name: 'gh-plugin', version: '3.0.0', description: '', homepage: '', spec: 'github:owner/repo#abc', source: 'github', dsh: true, path: '/tmp/gh-plugin' },
+      // spec 形如 github 但 source=npm → github 域不得命中（守卫用例，repo 与上条隔离）
+      { pkg: 'npm-lookalike', name: 'npm-lookalike', version: '4.0.0', description: '', homepage: '', spec: 'github:other/repo#abc', source: 'npm', dsh: true, path: '/tmp/npm-lookalike' },
+    ],
+    others: 0,
+    complete: true,
+    profileDir: '/tmp/p',
+  }
+  const registry = [
+    { id: 'e-alpha', name: 'EA', description: 'd', category: 'tools', tags: [], source: 'npm', npm: 'alpha' },
+    { id: 'e-xpkg', name: 'EX', description: 'd', category: 'tools', tags: [], source: 'npm', npm: 'x-pkg' },
+    { id: 'e-github', name: 'EG', description: 'd', category: 'tools', tags: [], source: 'github', github: 'owner/repo' },
+    { id: 'e-guard', name: 'EG2', description: 'd', category: 'tools', tags: [], source: 'github', github: 'other/repo' },
+  ]
+
+  it('name 域序 0 胜 pkg 域序 1；pkg 直接命中；github 命中；source=npm 的 github 形 spec 不命中', async () => {
+    const { deps } = fakeDeps({
+      loadRegistry: async () => readyLoaded(registry),
+      listInstalledPlugins: async () => installed,
+    })
+    const res = await listMarket(cfg, { withLatest: false }, deps)
+    const by = (id) => res.items.find((e) => e.id === id)
+    assert.equal(res.items.length, 4)
+    assert.equal(by('e-alpha').installed, true)
+    assert.equal(by('e-alpha').installedPkg, 'x-pkg', 'name 域序 0（x-pkg）压过 pkg 域序 1（alpha）')
+    assert.equal(by('e-alpha').installedVersion, '1.0.0')
+    assert.equal(by('e-xpkg').installed, true)
+    assert.equal(by('e-xpkg').installedPkg, 'x-pkg')
+    assert.equal(by('e-github').installed, true)
+    assert.equal(by('e-github').installedPkg, 'gh-plugin')
+    assert.equal(by('e-guard').installed, false, 'spec 形如 github 但 installed.source=npm → github 域不命中')
+  })
+})
+
+describe('existingMarketIds（FP2 2026-10-15：收藏 stale 批量化，三不原则——不枚举已装/不探测 latest/不分页）', () => {
+  it('① 存在/缺席/顺序/重复：present 按输入序过滤，不调用 listInstalledPlugins', async () => {
+    const { deps, calls } = fakeDeps()
+    const res = await existingMarketIds(['p-0', 'nope', 'p-999', 'p-0'], cfg, {}, deps)
+    assert.deepEqual(res.present, ['p-0', 'p-999', 'p-0'])
+    assert.equal(calls.listInstalled, 0, '不枚举已装（性能钉）')
+    assert.equal(calls.npm.length, 0, '不探测 latest')
+  })
+
+  it('② 空 ids 快路：不装载 registry', async () => {
+    const { deps, calls } = fakeDeps()
+    const res = await existingMarketIds([], cfg, {}, deps)
+    assert.deepEqual(res.present, [])
+    assert.equal(calls.loadRegistry.length, 0, '空 ids 立即返回，零装载')
+  })
+
+  it('③ 同身份 L2 命中钉：listMarket 落代后 existingMarketIds 免重建（builds 不增 + hits 增加）', async () => {
+    const primary = [{ id: 'p-0', name: 'P0', description: 'd', category: 'tools', tags: [], source: 'npm', npm: 'pkg-0' }]
+    const base = fakeDeps({ loadRegistry: async () => readyLoaded(primary) })
+    const { deps } = withCommunity(base, communityLoaded([communityRaw('keep', 'o2')]))
+    const first = await listMarket(cfg, { withLatest: false }, deps)
+    assert.equal(first.total, 2)
+    assert.equal(_mergedMarketStatsForTests().builds, 1, '首次查询落代')
+    const res = await existingMarketIds(['p-0', 'o2--keep'], cfg, {}, deps)
+    assert.deepEqual(res.present, ['p-0', 'o2--keep'], '主清单 + 社区合成 id（owner--name 小写）均命中')
+    assert.equal(_mergedMarketStatsForTests().builds, 1, '同身份第二次查询不重建代')
+    assert.ok(_mergedMarketStatsForTests().hits >= 1, '命中代的直接证据')
+  })
+
+  it('④ curatedFirst 挤出边界钉：id-exact 社区条目不被 primary 同词命中挤出（旧搜索页扇出在此构造下判 stale，属误判）', async () => {
+    // 旧路径 = market {query:'dsh--market', source:'all', limit:8, curatedFirst:true}：query 分词 ['dsh','market']，
+    // 10 条 primary name「DSH Market i」同字段全词命中（1050 分）进 filtered，curatedFirst 全部前置 →
+    // id-exact（10000 分）的社区条目被挤出前 8 → items.some(id) 为 false → 误判 stale。
+    // 批量版 = merged 域 id Set 成员判定 → 判 live（=「已从目录消失」的正确语义），本用例钉住不回归。
+    const primary = Array.from({ length: 10 }, (_, i) => ({
+      id: `m-${i}`, name: `DSH Market ${i}`, description: 'dm', category: 'tools', tags: [], source: 'npm', npm: `mpkg-${i}`,
+    }))
+    const base = fakeDeps({ loadRegistry: async () => readyLoaded(primary) })
+    const { deps } = withCommunity(base, communityLoaded([communityRaw('market', 'dsh')]))
+    const res = await existingMarketIds(['dsh--market'], cfg, {}, deps)
+    assert.deepEqual(res.present, ['dsh--market'])
   })
 })
 

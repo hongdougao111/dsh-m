@@ -145,6 +145,41 @@ describe('listInstalledPlugins：单包 manifest 分类（others 只数确认非
   })
 })
 
+describe('listInstalledPlugins：多依赖输出排序（并行化重构的钉住不变量）', () => {
+  it('5 个乱序写入的依赖（1 个非 DSH）：items 恒按依赖键字典序、others 计 1、complete:true', async () => {
+    // 键序刻意与字典序不同（zeta 最先写、alpha 最后写），钉住「输出序 = Object.keys(deps).sort()」
+    manifest({ dependencies: { zeta: '1.0.0', mid: '2.0.0', alpha: '1.0.0', omega: '3.0.0', beta: '2.0.0' } })
+    pkgJson('zeta', { name: 'Z', version: '1.0.0', dsh: {} })
+    pkgJson('mid', { name: 'M', version: '2.0.0', dsh: {} })
+    pkgJson('alpha', { name: 'A', version: '1.0.0', dsh: {} })
+    pkgJson('omega', { name: 'O', version: '3.0.0' }) // 合法 manifest 无 dsh 字段 → 非 DSH
+    pkgJson('beta', { name: 'B', version: '2.0.0', dsh: {} })
+    const res = await listInstalledPlugins(dir)
+    assert.equal(res.complete, true)
+    assert.equal(res.others, 1)
+    assert.deepEqual(res.items.map((it) => it.pkg), ['alpha', 'beta', 'mid', 'zeta'])
+  })
+})
+
+describe('listInstalledPlugins：patchRows 按需采集（2026-10-15 市场热路径选择退出）', () => {
+  it('缺省带 patchRows（readable + inserts）；{ patchRows: false } 省略字段、其余不变', async () => {
+    manifest({ dependencies: { 'pkg-a': '1.0.0' } })
+    pkgJson('pkg-a', { name: 'A', version: '1.0.0', dsh: {} })
+    const patchPath = join(dir, 'node_modules', 'pkg-a', 'cordis.patch.yml')
+    writeFileSync(patchPath, "- insert:\n  - id: \"@x/a\"\n")
+    const withPatch = await listInstalledPlugins(dir)
+    assert.equal(withPatch.items[0].patchRows?.readable, true)
+    assert.deepEqual(withPatch.items[0].patchRows?.inserts, [{ id: '@x/a' }])
+    const without = await listInstalledPlugins(dir, { patchRows: false })
+    assert.equal(without.items[0].patchRows, undefined)
+    assert.equal(without.items[0].pkg, withPatch.items[0].pkg)
+    assert.equal(without.items[0].name, withPatch.items[0].name)
+    assert.equal(without.items[0].version, withPatch.items[0].version)
+    assert.equal(without.complete, true)
+    assert.equal(without.others, 0)
+  })
+})
+
 describe('listInstalledPlugins/readProfileDeps：partial 语义与特殊 key', () => {
   it('混合合法/非法 spec：complete:false，已确认合法 DSH 项保留', async () => {
     manifest({ dependencies: { 'pkg-good': '1.0.0', 'pkg-bad': null, 'pkg-blank': '  ' } })
