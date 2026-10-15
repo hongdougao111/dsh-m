@@ -727,7 +727,9 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
   .dshm-spacer{order:1}
   .dshm-head>.dshm-dshchip{order:2}
   .dshm-winctl{order:3}
-  .dshm-winctl button{height:36px}
+  /* 0.9.89：winctl 触控加大（36px）从容器断点迁至 pointer:coarse——按钮大小不该随
+     两行/单行模式跳变（主人实测 720 边界忽大忽小），真正变量是输入方式；触屏设备
+     全模式恒 36px，鼠标设备全模式恒 28px */
   .dshm-seg{order:4;flex:1 1 100%}
   .dshm-seg button{flex:1;justify-content:center;white-space:nowrap;padding:0 10px;height:36px}
   /* 版本 chip（共识 Q7 + 评审 R5 收窄）：常态隐藏（设置页随时可见）；warn 态缩为 ⬆
@@ -740,6 +742,8 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
 /* overlay 窄视口兜底：还原态 8px（.full 的 padding:0 特异性 (0,2,0)>(0,1,0) 自然保持）；
    窄视口默认全屏的 JS 判定在 MarketPanel full 初始化 */
 @media (max-width:600px){.dshm-overlay{padding:8px}}
+/* 触控目标加大随输入方式而非宽度（0.9.89 迁移，见 720 块内注释） */
+@media (pointer:coarse){.dshm-winctl button{height:36px}}
 `;
 
 /** CSS 内容哈希（djb2）：bundle 更新 → 哈希变 → 旧样式自动替换（GUI 长驻页面热更自愈，0.7.8）。 */
