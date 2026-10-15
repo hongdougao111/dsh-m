@@ -58,6 +58,14 @@ jobs:
           fi
           echo "Publishing $PKG_NAME@$PKG_VERSION"
 
+      # 0.9.89 retro（know-how 031）：tag 即发布，此前零门禁——lockfile 版本欠账 21 个版本才被发现。
+      # 发布前跑全量门禁 + 版本三处一致性（package.json / lockfile 根 / lockfile packages.""）。
+      - name: Gate (typecheck + tests + version trinity)
+        run: |
+          npm run typecheck
+          npm test
+          node -e "const p=require('./package.json'),l=require('./package-lock.json');const bad=[l.version,l.packages&&l.packages['']&&l.packages[''].version].some(v=>v!==p.version);if(bad){console.error('version trinity mismatch: package.json',p.version,'vs lockfile',l.version,(l.packages&&l.packages['']||{}).version);process.exit(1)};console.log('version trinity ok:',p.version)"
+
       - name: Publish (provenance; output → step summary)
         run: |
           set -o pipefail
