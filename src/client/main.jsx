@@ -342,7 +342,7 @@ const CSS = `
 @media (pointer:coarse){.dshm-rz{display:none}} /* belt ②：coarse 指针整组隐藏（Q8） */
 /* 窗口控制组（0.7.7）：最大化/关闭连体按钮组——等宽两格 + 发丝分隔线，统一线条图标 */
 /* 窗口控制组（0.7.7/0.7.8）：最大化/关闭连体按钮组——透明底 + 发丝外框，与搜索清除钮同一配色语言；宽格防误触 */
-.dshm-winctl{display:inline-flex;align-items:stretch;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:9px;background:transparent;overflow:hidden;flex:none}
+.dshm-winctl{display:inline-flex;align-items:center;height:34px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:9px;background:transparent;overflow:hidden;flex:none}
 .dshm-winctl button{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4b5563);width:44px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s}
 .dshm-winctl button + button{border-left:1px solid var(--dsw-alias-border-l1,rgba(127,127,127,.18))}
 .dshm-winctl button:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-label-primary,inherit)}
@@ -743,7 +743,7 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
    窄视口默认全屏的 JS 判定在 MarketPanel full 初始化 */
 @media (max-width:600px){.dshm-overlay{padding:8px}}
 /* 触控目标加大随输入方式而非宽度（0.9.89 迁移，见 720 块内注释） */
-@media (pointer:coarse){.dshm-winctl button{height:36px}}
+@media (pointer:coarse){.dshm-winctl{height:38px}.dshm-winctl button{height:36px}}
 `;
 
 /** CSS 内容哈希（djb2）：bundle 更新 → 哈希变 → 旧样式自动替换（GUI 长驻页面热更自愈，0.7.8）。 */
