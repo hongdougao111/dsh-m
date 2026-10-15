@@ -3503,18 +3503,28 @@ function MarketPanel({ onClose }) {
   const sizeRef = useRef(size);
   sizeRef.current = size; // render 期赋值（latest-ref，同 posRef/fullRef 先例；T4 reclamp 禁同 tick 读它）
   const resizingRef = useRef(false);
-  // 重夹紧：还原态渲染后（挂载/全屏往返）与窗口 resize 时，把记忆位置收回当前视口 + titlebar
-  // 带内；全屏态与拖拽中跳过（拖拽帧有实时 clamp，全屏无位置语义）。
+  // 重夹紧：还原态渲染后（挂载/全屏往返）与窗口 resize 时，把记忆尺寸与记忆位置收回
+  // 当前视口 + titlebar 带内；全屏态与拖拽/resize 手势中跳过（手势帧有实时钳位，全屏
+  // 无几何语义）。顺序：先夹尺寸、再夹位置（评审 R1-4——位置钳位必须消费夹后尺寸，
+  // 否则单次调用内「先夹尺寸再夹位置」退化为单夹，越界要等下一次 resize 才自愈）。
   const reclamp = useCallback(() => {
-    if (fullRef.current || draggingRef.current || !panelRef.current || typeof window === "undefined") return;
+    if (fullRef.current || draggingRef.current || resizingRef.current || !panelRef.current || typeof window === "undefined") return;
+    const vp = { width: window.innerWidth, height: window.innerHeight };
+    const insets = readTitlebarInsets();
+    // ① 先夹尺寸：同 tick 内 setSize 不重渲（sizeRef 是 render 期赋值），位置钳位必须
+    // 复用本地计算结果、禁读 sizeRef——读了拿到的是夹前值（评审 R1-4）
+    const prevSize = sizeRef.current;
+    const eff = prevSize ? clampSize(prevSize, vp, insets) : null;
+    if (eff && prevSize && (eff.w !== prevSize.w || eff.h !== prevSize.h)) setSize(eff);
+    // ② 后夹位置：消费上面夹好的 eff（无尺寸记忆回退 rect，行为与旧版逐字节一致）
     const prev = posRef.current;
     if (!prev) return;
     const rect = panelRef.current.getBoundingClientRect();
     const next = clampPoint(
       { x: prev.x, y: prev.y },
-      { width: window.innerWidth, height: window.innerHeight },
-      { width: rect.width, height: rect.height },
-      readTitlebarInsets(),
+      vp,
+      eff ? { width: eff.w, height: eff.h } : { width: rect.width, height: rect.height },
+      insets,
     );
     if (next.x !== prev.x || next.y !== prev.y) setPos(next);
   }, []);
