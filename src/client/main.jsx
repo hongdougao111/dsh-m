@@ -3648,6 +3648,139 @@ function MarketPanel({ onClose }) {
       document.body.style.userSelect = "";
     };
   }, []);
+  // resize 手势状态机（panel resize，T3）：pointerdown 落手柄启动；主键门卫 +
+  // setPointerCapture 防御式捕获（评审 R1-3/R1-5，拖拽机同款三件）；slop 分级复用
+  // dragSlop；手势期才挂 document 监听；pointermove 只存点，宽高写集中在 rAF 帧内
+  // （帧回调首行守卫拦释放后残帧）；释放 clampSize（.abs 形态带 origin 第二钳，R1-2）
+  // 收口 → savePanelSize + setSize 一次；cancel 还原到拖前记忆（与拖拽 cancel 语义
+  // 对称）。touch/pen 不启动（Q8）。无 will-change：宽高写触发 layout，transform 的
+  // 合成器通道不适用（ADR-0021 性能后果）。
+  useEffect(() => {
+    const panelEl = panelRef.current;
+    if (!panelEl) return undefined;
+    let zone = null; // "e" | "s" | "se"
+    let resizing = false;
+    let moved = false;
+    let slop = 6;
+    let originX = 0, originY = 0;
+    let startW = 0, startH = 0;
+    let originRect = null; // .abs 形态第二钳原点（R1-2）：pointerdown 时面板左上角；居中形态恒 null
+    let lastPoint = null;
+    let raf = 0;
+    const ZONE_CURSOR = { e: "ew-resize", s: "ns-resize", se: "nwse-resize" };
+    const bindGesture = () => {
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("pointercancel", onPointerCancel);
+    };
+    const unbindGesture = () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerCancel);
+    };
+    const frameStep = () => {
+      // 帧回调首行守卫（拖拽机评审 R1-5 同款）：释放/取消后的在途残帧一律早退
+      raf = 0;
+      if (!resizing || !moved || !lastPoint || !panelRef.current) return;
+      const raw = {
+        w: zone === "s" ? startW : startW + (lastPoint.x - originX),
+        h: zone === "e" ? startH : startH + (lastPoint.y - originY),
+      };
+      const next = clampSize(raw, { width: window.innerWidth, height: window.innerHeight }, readTitlebarInsets(), originRect);
+      panelRef.current.style.width = `${Math.round(next.w)}px`;
+      panelRef.current.style.height = `${Math.round(next.h)}px`;
+    };
+    const onPointerMove = (event) => {
+      if (!resizing) return;
+      if (!moved) {
+        if (Math.hypot(event.clientX - originX, event.clientY - originY) < slop) return;
+        moved = true;
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = ZONE_CURSOR[zone]; // 指针出面板后光标不灭
+      }
+      // pointermove 只存点不写样式，样式写集中在 rAF 帧内（拖拽机评审 R2-1 帧内写语义）
+      lastPoint = { x: event.clientX, y: event.clientY };
+      if (!raf) raf = requestAnimationFrame(frameStep);
+    };
+    const onPointerUp = () => {
+      if (!resizing) return;
+      const baked = panelRef.current
+        ? clampSize(
+            moved && lastPoint
+              ? { w: zone === "s" ? startW : startW + (lastPoint.x - originX), h: zone === "e" ? startH : startH + (lastPoint.y - originY) }
+              : { w: startW, h: startH },
+            { width: window.innerWidth, height: window.innerHeight },
+            readTitlebarInsets(),
+            originRect,
+          )
+        : null;
+      unbindGesture();
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      resizing = false;
+      resizingRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      if (!moved) return; // 纯点击手柄：无语义，不动尺寸
+      try {
+        savePanelSize(typeof window !== "undefined" && window.localStorage ? window.localStorage : null, baked);
+      } catch {
+        /* 非有限属编程错误（baked 恒有限）；localStorage 缺席由 savePanelSize 内部静默 */
+      }
+      setSize(baked); // 收口：inline 宽高回归 React 渲染（与拖拽烘焙 left/top 同型）
+    };
+    const onPointerCancel = () => {
+      if (!resizing) return;
+      unbindGesture();
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      resizing = false;
+      resizingRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      // 还原视觉：手势期 inline 写已覆盖记忆值，按记忆回写（无记忆清空回类默认）
+      if (panelRef.current) {
+        panelRef.current.style.width = sizeRef.current ? `${sizeRef.current.w}px` : "";
+        panelRef.current.style.height = sizeRef.current ? `${sizeRef.current.h}px` : "";
+      }
+    };
+    const onPointerDown = (event) => {
+      if (resizing) return; // 多指重入守卫（拖拽机评审 R1-7 同款）
+      if (event.button !== 0) return; // 只认主键（拖拽机 main.jsx:3607 同款；评审 R1-5①）
+      if (event.pointerType !== "mouse") return; // Q8：触屏/触笔不启动（coarse CSS 为 belt）
+      const handle = event.target?.closest?.("[data-dshm-resize]");
+      if (!handle) return;
+      zone = handle.getAttribute("data-dshm-resize");
+      const rect = panelRef.current.getBoundingClientRect();
+      startW = rect.width; startH = rect.height;
+      // origin 第二钳（R1-2）：.abs 形态（pos 记忆在）左上角固定，右/下缘不破 8px 边距；
+      // 居中形态传 null——每帧 flex 重居中，传了会拿起始原点过度收紧（封死拉满路径）
+      originRect = posRef.current ? { left: rect.left, top: rect.top } : null;
+      originX = event.clientX; originY = event.clientY;
+      slop = dragSlop(event.pointerType);
+      resizing = true;
+      resizingRef.current = true;
+      moved = false;
+      lastPoint = null;
+      if (handle.setPointerCapture) {
+        try {
+          handle.setPointerCapture(event.pointerId); // 拖出窗外释放也能收到 pointerup（拖拽机 main.jsx:3621-3627 同款，评审 R1-3）
+        } catch {
+          /* 指针已释放等竞态静默；document 监听仍在，行为退化不卡死 */
+        }
+      }
+      bindGesture();
+    };
+    panelEl.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      panelEl.removeEventListener("pointerdown", onPointerDown);
+      unbindGesture();
+      if (raf) cancelAnimationFrame(raf);
+      // 卸载时手势中途（如 Esc 关面板）：恢复 body 样式不留残留（评审 R1-5②；拖拽机 cleanup 同款）
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, []);
   // 市场数据唯一 owner（0.7.0 Task 9：两分区独立状态实例，切 tab 互不重置；
   // 收藏区数据在 Task 14 落地，本地 localStorage 不走 market 通道）
   const marketCommunity = useMarketData("community");
