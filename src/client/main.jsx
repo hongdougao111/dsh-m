@@ -720,8 +720,10 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
 @container (max-width:720px){
   .dshm-head{flex-wrap:wrap;row-gap:6px}
   .dshm-head-divider{display:none}
-  .dshm-title-full{display:none}
-  .dshm-title-short{display:inline}
+  /* 0.9.89：两行态保留完整标题（主人提议实测采纳）——seg 让行后首行空间充裕
+     （640 宽实测 612px 内容区只需 ~300px），短标题切换反而制造断点换字闪烁；
+     极端窄由 .dshm-title 的 nowrap+ellipsis 兜底。DOM 双 span 与基础隐藏规则
+     保留（短标题永不显示，回退零成本）。 */
   .dshm-spacer{order:1}
   .dshm-head>.dshm-dshchip{order:2}
   .dshm-winctl{order:3}
