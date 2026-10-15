@@ -55,13 +55,17 @@ async function callApi(dispatcher, args) {
 /** 独立 setup：trust/profile/desktop 行为全可编排；业务 deps 为记录型桩。 */
 function setupTrust({ trust, profile, overrides = {} } = {}) {
   const controller = createRegistryController({})
-  const calls = { listInstalled: [], scheduleRestart: [], upgrade: [], uninstall: [], selfUpgrade: [], desktopInstall: [], desktopToggle: [], desktopUpgrade: [], desktopUninstall: [], toggle: [] }
+  const calls = { listInstalled: [], scheduleRestart: [], upgrade: [], uninstall: [], selfUpgrade: [], desktopInstall: [], desktopToggle: [], desktopUpgrade: [], desktopUninstall: [], toggle: [], existingIds: [] }
   const dispatcher = createApiDispatcher({
     controller,
     pkg: { name: 'dsh-m', version: '0.0.0-test' },
     profile: profile ?? { name: 'web', kind: 'web', dir: '/tmp/profile', source: 'fallback' },
     deps: {
       resolveDshVersion: async () => '0.0.0-dsh-test',
+      existingMarketIds: async (ids) => {
+        calls.existingIds.push(ids)
+        return { present: ids.filter((i) => i !== 'gone') }
+      },
       getCommunitySummary: async () => ({
         enabled: false, status: 'disabled', version: null, checkedAt: null, fetchedAt: null,
         route: null, acceptedCount: 0, upstreamCount: null, displaced: 0,
@@ -192,6 +196,26 @@ describe('host-api ping.profile（GUI chip 数据源）', () => {
     const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'ping' } })
     assert.equal(res.status, 200)
     assert.deepEqual(res.body.profile, { name: 'desktop', kind: 'desktop', source: 'host' })
+  })
+})
+
+describe('host-api market-ids-exist（0.9.87 FP2：收藏 stale 批量化）', () => {
+  it('合法 ids → 200 + present 透传 + 桩收到 trim 后数组', async () => {
+    const { dispatcher, calls } = setupTrust({ trust: () => undefined })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'market-ids-exist', ids: ['a', 'gone', ' b '] } })
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.body.present, ['a', 'b'])
+    assert.deepEqual(calls.existingIds, [['a', 'gone', 'b']], 'trim 后透传，缺席剔除由 core 负责')
+  })
+
+  it('malformed ids → 400（非数组 / 含非字符串 / trim 空串）', async () => {
+    const { dispatcher, calls } = setupTrust({ trust: () => undefined })
+    for (const ids of ['x', ['a', 1], ['a', '  ']]) {
+      const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'market-ids-exist', ids } })
+      assert.equal(res.status, 400, `ids=${JSON.stringify(ids)} 应 400`)
+      assert.match(String(res.body?.error), /非法 ids/)
+    }
+    assert.equal(calls.existingIds.length, 0, '校验失败不得触达 core')
   })
 })
 

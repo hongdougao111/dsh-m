@@ -8,12 +8,12 @@
  */
 import { mkdir, readFile, rm, rename, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
-import { cacheRoot } from './env.js'
+import { cacheRoot, WEB_PROFILE } from './env.js'
 import { decodeUtf8Fatal, fetchBytesLimited, describeFetchFailure } from './httpx.js'
 import { isExactVersion, npmLatest } from './versions.js'
-import { communityOutcome } from './merged-market.js'
+import { mergedOutcome } from './merged-market.js'
 import type { CommunityRegistrySummary } from './merged-market.js'
-import type { RegistryEntry } from './registry.js'
+import type { LoadedRegistry, RegistryCacheNamespace, RegistryEntry } from './registry.js'
 
 export const COMMUNITY_NPM_PACKAGE = 'dsh-plugin-catalog'
 export const MAX_COMMUNITY_BYTES = 32 * 1024 * 1024
@@ -596,23 +596,40 @@ export interface CommunitySummaryOptions {
   signal?: AbortSignal
   /** 本 waiter 的等待上限（绝对时刻，host-api 传 now + 3s）；到点返回 unavailable summary */
   deadlineAt: number
+  /** 缓存命名空间（缺省 'host'，与改道前隐式默认一致；0.9.87 FP3 随 mergedOutcome 身份键引入） */
+  namespace?: RegistryCacheNamespace
+  /** profile 段（缺省 WEB_PROFILE='web'，与改道前 awesomeDir 隐式默认逐字节同路——缓存目录 parity） */
+  profile?: string
 }
 
 /**
- * 单一深接口（计划 Task 6）：fetch → adapt → merge 计数 → CommunityRegistrySummary。
- * - primaryEntries 直接取本次 registry snapshot 的 primary plugins（displaced 与本次响应同代，
+ * 单一深接口（计划 Task 6）：fetch → mergedOutcome（L2 代存储）→ CommunityRegistrySummary。
+ * - 0.9.87 FP3：改道 mergedOutcome——同身份（registry 代 + 目录 version）命中即免全量
+ *   adapt+merge（每次设置页打开 ~10-50ms CPU），summary 仍由当次 state 现算（「summary
+ *   永不入代」不变量保持）；失败/deadline/unavailable/disabled 形态透传不落代；
+ * - registry 直接取本次 registry snapshot 的 LoadedRegistry（displaced 与本次响应同代，
  *   不重复加载主清单；内部禁止调用 loadRegistry——单一来源约束）；
+ * - namespace/profile 显式透传：缺省 'host'/WEB_PROFILE，与改道前 fetchCommunityCatalog/
+ *   awesomeDir 的隐式默认逐字节同路（缓存目录恒 web 段——**自觉取舍**：保 parity 优先于
+ *   与 market 臂共享 L2 代，desktop host 下各建各代是接受的成本，勿当「漏传」修复）；
  * - 3s 是本 waiter 的等待上限（waiter-scoped race）：到点未 materialize → unavailable +
  *   「社区目录状态获取超时」errors，调用方主响应照常；共享 flight 按 30s hard cap 继续；
  * - 数据源 cache-first：fetchCommunityCatalog 的版本缓存 + TTL 保证 registry 刷新无重复网络压力。
  */
 export async function getCommunitySummary(
-  primaryEntries: RegistryEntry[],
+  registry: LoadedRegistry,
   cfg: CommunityConfig = {},
   opts: CommunitySummaryOptions,
 ): Promise<CommunityRegistrySummary> {
-  const task = fetchCommunityCatalog(cfg, { signal: opts.signal, force: opts.force })
-  const outcome = await communityOutcome(task, opts.deadlineAt, primaryEntries)
+  const task = fetchCommunityCatalog(cfg, { namespace: opts.namespace, signal: opts.signal, force: opts.force, profile: opts.profile })
+  const outcome = await mergedOutcome({
+    namespace: opts.namespace ?? 'host',
+    profile: opts.profile ?? WEB_PROFILE,
+    cfg,
+    registry,
+    communityTask: task,
+    deadlineAt: opts.deadlineAt,
+  })
   return outcome.summary
 }
 

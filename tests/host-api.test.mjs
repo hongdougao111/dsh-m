@@ -877,8 +877,10 @@ describe('M1 Task 6：host-api 社区契约', () => {
 
     const primaryLens = []
     const { dispatcher: d2 } = setup({
-      getCommunitySummary: async (primaryEntries) => {
-        primaryLens.push(primaryEntries.length)
+      // 0.9.87 FP3：getCommunitySummary 收整个 LoadedRegistry（mergedOutcome 身份键需要
+      // configuredAddress/fetchedAt）——同代断言改为 registry.registry.plugins 对齐
+      getCommunitySummary: async (registry) => {
+        primaryLens.push(registry.registry.plugins.length)
         return readySummary()
       },
     })
@@ -887,21 +889,21 @@ describe('M1 Task 6：host-api 社区契约', () => {
     assert.equal(reg.body.community.status, 'ready')
     assert.equal(reg.body.community.acceptedCount, 4189)
     assert.equal(reg.body.community.skippedSubpathNoNpm, 188)
-    assert.ok(primaryLens[0] >= 0 && primaryLens[0] === reg.body.plugins.length, 'primaryEntries 与本次 snapshot 同代')
+    assert.ok(primaryLens[0] >= 0 && primaryLens[0] === reg.body.plugins.length, 'registry.registry.plugins 与本次 snapshot 同代')
   })
 
-  it('⑥b registry 数据源 cache-first：两次调用 primaryEntries 为同一 snapshot 引用（不重拉主清单）', async () => {
+  it('⑥b registry 数据源 cache-first：两次调用 registry 为同一 snapshot 引用（不重拉主清单）', async () => {
     const refs = []
     const { dispatcher } = setup({
-      getCommunitySummary: async (primaryEntries) => {
-        refs.push(primaryEntries)
+      getCommunitySummary: async (registry) => {
+        refs.push(registry)
         return readySummary()
       },
     })
     await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'registry' } })
     await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'registry' } })
     assert.equal(refs.length, 2)
-    assert.ok(refs[0] === refs[1], '两次 registry 快照未变 → 同一 plugins 数组引用（单一来源约束）')
+    assert.ok(refs[0] === refs[1], '两次 registry 快照未变 → 同一 LoadedRegistry 引用（单一来源约束）')
   })
 
   it('⑥c registry 的 force 不连坐社区 summary（0.9.11：强制刷新语义只属精选链）', async () => {

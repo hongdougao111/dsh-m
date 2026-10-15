@@ -16,6 +16,7 @@ import {
   MAX_COMMUNITY_ENTRIES,
   validateCommunityContainer,
 } from '../lib/core/community.js'
+import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
 
 const fixture = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'community-catalog-sample.json'), 'utf8'),
@@ -490,12 +491,31 @@ describe('fetchCommunityCatalog（获取链）', () => {
   })
 })
 
-// ---------- M1 Task 6：getCommunitySummary（registry 响应社区 summary 单一深接口） ----------
+// ---------- M1 Task 6：getCommunitySummary（registry 响应社区 summary 单一深接口；0.9.87 FP3 改道 mergedOutcome L2） ----------
+
+/** 最小 LoadedRegistry 假件：mergedOutcome/identityKey 只读 configuredAddress/fetchedAt/registry.plugins。 */
+function fakeReg() {
+  return {
+    configuredAddress: '',
+    activeAddress: null,
+    source: 'bundled',
+    status: 'ready',
+    isDefault: true,
+    stale: false,
+    fetchedAt: '2026-10-15T00:00:00.000Z',
+    errors: [],
+    count: 0,
+    registry: { version: 1, plugins: [] },
+  }
+}
 
 describe('getCommunitySummary', () => {
+  // FP3 起经 mergedOutcome（L2 代存储）——跨用例隔离（market.test.mjs 同款纪律）
+  beforeEach(() => _resetMergedMarketForTests())
+
   it('disabled 配置 → disabled summary（零网络立即返回）', async () => {
     const { getCommunitySummary } = await import('../lib/core/community.js')
-    const summary = await getCommunitySummary([], { communityCatalog: false }, { deadlineAt: Date.now() + 1000 })
+    const summary = await getCommunitySummary(fakeReg(), { communityCatalog: false }, { deadlineAt: Date.now() + 1000 })
     assert.equal(summary.enabled, false)
     assert.equal(summary.status, 'disabled')
     assert.equal(summary.acceptedCount, 0)
@@ -504,9 +524,17 @@ describe('getCommunitySummary', () => {
 
   it('非法 pin → unavailable summary（零网络零写入）', async () => {
     const { getCommunitySummary } = await import('../lib/core/community.js')
-    const summary = await getCommunitySummary([], { communityCatalogPin: '../../etc' }, { deadlineAt: Date.now() + 1000 })
+    const summary = await getCommunitySummary(fakeReg(), { communityCatalogPin: '../../etc' }, { deadlineAt: Date.now() + 1000 })
     assert.equal(summary.status, 'unavailable')
     assert.ok(summary.errors.some((e) => e.includes('communityCatalogPin')))
+  })
+
+  it('冒烟：disabled cfg 连续两次调用 status 稳定且不抛（FP3 改道后零网络路径）', async () => {
+    const { getCommunitySummary } = await import('../lib/core/community.js')
+    const a = await getCommunitySummary(fakeReg(), { communityCatalog: false }, { deadlineAt: Date.now() + 1000 })
+    const b = await getCommunitySummary(fakeReg(), { communityCatalog: false }, { deadlineAt: Date.now() + 1000 })
+    assert.equal(a.status, 'disabled')
+    assert.equal(b.status, 'disabled')
   })
 })
 

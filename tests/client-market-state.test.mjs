@@ -302,11 +302,13 @@ describe('marketResponseEquivalent（C3 零增量提交守卫：JSON 值语义�
 })
 
 // ---------- C3 接线结构锚（main.jsx 源串；client-lightbox 同款惯例） ----------
-describe('C3 接线结构锚（收藏 cache-only + fetchPage 零增量守卫）', () => {
+describe('C3 接线结构锚（收藏批量 stale + fetchPage 零增量守卫）', () => {
   const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
 
-  it('lookupLive 走 cache-only：stale 只需成员布尔，latest 扇出产物全丢弃', () => {
-    assert.ok(src.includes('api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" })'), '收藏 stale 检查必须传 probeMode cache-only（fetchPage 同款先例）')
+  it('stale 检查批量化（0.9.87 FP2）：单次 market-ids-exist，失败保守全 stale', () => {
+    assert.ok(src.includes('api("market-ids-exist", { ids: list.map((f) => f.id) })'), '收藏 stale 检查必须单发批量 market-ids-exist（取代逐收藏 market 扇出）')
+    assert.ok(src.includes('catch {\n          present = new Set();'), 'API 失败 → 空 Set = 全部保守 stale（旧逐条 catch→false 同语义）')
+    assert.ok(!src.includes('api("market", { query: fav.id'), '不得回退逐收藏 market 扇出')
   })
   it('fetchPage 零增量守卫：内容等价不提交，loading 照常收口', () => {
     assert.ok(src.includes('if (!marketResponseEquivalent(prevData, merged)) setData(merged);'), '守卫调用逐字锚')

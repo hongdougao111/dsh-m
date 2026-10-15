@@ -221,7 +221,7 @@ describe('L2 物化合并市场（ADR-0016）', () => {
     const a = await communityOutcome(task, Date.now() + 5000, PRIMARY)
     const b = await communityOutcome(task, Date.now() + 5000, PRIMARY)
     assert.equal(a.summary.status, 'ready')
-    assert.notEqual(a.merged, b.merged, '无 memo：每次现算新数组（getCommunitySummary / 降级路径专用）')
+    assert.notEqual(a.merged, b.merged, '无 memo：每次现算新数组（降级路径专用；getCommunitySummary 0.9.87 起改道 mergedOutcome）')
     assert.equal(_mergedMarketStatsForTests().builds, 0)
     assert.equal(_mergedMarketStatsForTests().hits, 0)
   })

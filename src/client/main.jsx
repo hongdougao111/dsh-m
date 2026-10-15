@@ -3063,18 +3063,17 @@ function FavoriteZone({ favorites, onOpen }) {
     // toggle 引发的重查保留——顺带校验新收藏是否刚收录就已下架
     const timer = setTimeout(() => {
       void (async () => {
-        // stale 判定 = listMarket id 精确查询的结果集成员判定（Task 3 保证 id 整串精确命中）
-        const lookupLive = async (fav) => {
-          try {
-            // C3（钢人报告）：stale 判定只要「id 还在不在」的成员布尔，probeMode cache-only
-            // 零网络零探测（ADR-0013 第一段模式）——full 的 latest 扇出产物本就全丢弃。
-            const res = await api("market", { query: fav.id, source: "all", limit: 8, probeMode: "cache-only" });
-            const items = res && Array.isArray(res.items) ? res.items : [];
-            return items.some((x) => x && x.id === fav.id);
-          } catch {
-            return false;
-          }
-        };
+        // 0.9.87 FP2：stale 判定批量化——单次 market-ids-exist（merged 域 id Set 成员判定）取代
+        // 逐收藏完整 market 查询扇出（C3 语义保留：只要「id 还在不在」的成员布尔，零 latest 探测）。
+        // 失败/形态异常 → 空 Set = 全部保守 stale（与旧逐条 catch→false 同语义）。
+        let present = new Set();
+        try {
+          const res = await api("market-ids-exist", { ids: list.map((f) => f.id) });
+          if (res && Array.isArray(res.present)) present = new Set(res.present);
+        } catch {
+          present = new Set();
+        }
+        const lookupLive = async (fav) => present.has(fav.id);
         const { stale } = await partitionStale(list, lookupLive);
         if (live) setCheck({ staleIds: stale.map((f) => f.id) });
       })();

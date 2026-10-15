@@ -13,6 +13,7 @@ import { runDoctor } from './doctor.js'
 import {
   listInstalledWithMeta,
   listMarket,
+  existingMarketIds,
   installFromRegistry,
   selfUpgrade,
   uninstallPlugin,
@@ -54,6 +55,8 @@ class ApiProtocolError extends Error {
 export interface HostApiOverrides {
   listMarket?: typeof listMarket
   listInstalledWithMeta?: typeof listInstalledWithMeta
+  /** 0.9.87 FP2：批量 id 存在性（收藏 stale 检测批量化；测试注入）。 */
+  existingMarketIds?: typeof existingMarketIds
   installFromRegistry?: typeof installFromRegistry
   uninstallPlugin?: typeof uninstallPlugin
   upgradePlugin?: typeof upgradePlugin
@@ -280,6 +283,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
   const d = {
     listMarket: ctx.deps?.listMarket ?? listMarket,
     listInstalledWithMeta: ctx.deps?.listInstalledWithMeta ?? listInstalledWithMeta,
+    existingMarketIds: ctx.deps?.existingMarketIds ?? existingMarketIds,
     installFromRegistry: ctx.deps?.installFromRegistry ?? installFromRegistry,
     uninstallPlugin: ctx.deps?.uninstallPlugin ?? uninstallPlugin,
     upgradePlugin: ctx.deps?.upgradePlugin ?? upgradePlugin,
@@ -394,10 +398,14 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           // 0.9.11：不再透传 force——「强制刷新」语义是精选清单（registry 链），社区目录走自己的
           // TTL/共享 flight；此前 force 连坐会在弱网下把社区卡打成 3s 超时的「不可用」占位
           // （Windows 实机 2026-10-01：点强制刷新 → 社区卡「获取超时」，flight 后台自愈前一直报错）。
-          const community = await d.getCommunitySummary(snap.loaded.registry.plugins, cfg(), {
+          // 0.9.87 FP3：getCommunitySummary 改道 mergedOutcome（L2）——registry 传 snap.loaded
+          // 整体（身份键需要 configuredAddress/fetchedAt）；namespace 'host' + profile 缺省
+          // （WEB_PROFILE）与改道前缓存路径逐字节同路。
+          const community = await d.getCommunitySummary(snap.loaded, cfg(), {
             force: false,
             signal,
             deadlineAt: Date.now() + 3_000,
+            namespace: 'host',
           })
           payload = { plugins: snap.loaded.registry.plugins, registryState: snap.loaded, community }
           break
@@ -490,6 +498,23 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             signal,
           })
           payload = { ...result }
+          break
+        }
+
+        case 'market-ids-exist': {
+          // 0.9.87 FP2：收藏 stale 检测批量化——一次批量 id 存在性查询取代逐收藏完整 market 扇出。
+          // 校验：非空字符串数组 ≤500（trim 后透传）；违例 400（与 source/sort/probeMode 同款不静默吞）。
+          const rawIds = body.ids
+          if (!Array.isArray(rawIds) || rawIds.length > 500 || rawIds.some((v) => typeof v !== 'string' || v.trim() === '')) {
+            throw new ApiProtocolError(400, '非法 ids: 需非空字符串数组（≤500）')
+          }
+          const ids = (rawIds as string[]).map((v) => v.trim())
+          const result = await d.existingMarketIds(ids, cfg(), {
+            namespace: 'host',
+            profile: profile.name,
+            signal,
+          })
+          payload = { present: result.present }
           break
         }
 
