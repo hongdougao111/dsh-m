@@ -370,6 +370,11 @@ const CSS = `
    容器停用后，stuck 翻转不再移动哨兵，循环在驱动器处断开；面板内容只向下分页追加、
    无上方懒加载布局，锚定损失趋零。 */
 .dshm-body{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;overflow-anchor:none}
+/* tab 切换淡入（0.9.88）：key={tab} 重挂触发动画重放；只动 opacity、只播一次——
+   resize 拖拽路径零动画红线不受影响；prefers-reduced-motion 一票关闭 */
+@keyframes dshm-tabfade{from{opacity:0}}
+.dshm-tabpane{display:flex;flex-direction:column;gap:12px;animation:dshm-tabfade .16s ease}
+@media (prefers-reduced-motion:reduce){.dshm-tabpane{animation:none}}
 .dshm-hint{color:var(--dsw-alias-label-caption,#6b7280);font-size:12px;line-height:18px;margin:0}
 .dshm-err{color:var(--dsw-alias-state-error-primary,#b91c1c);font-size:12px;line-height:18px}
 .dshm-ok{color:var(--dsw-alias-state-success-primary,#047857);font-size:12px;line-height:18px;word-break:break-word}
@@ -4109,6 +4114,12 @@ function MarketPanel({ onClose }) {
       h(
         "div",
         { className: "dshm-body" },
+        // 0.9.88 tab 切换淡入：key={tab} 重挂触发 CSS 动画重放；pane 复刻 body 的
+        // flex-column+gap 节奏（包裹后 body 只剩单子项，间距不能塌）。只动 opacity、
+        // 只在 tab 切换播一次——resize 拖拽路径零动画红线（ADR-0021）不受影响。
+        h(
+          "div",
+          { key: tab, className: "dshm-tabpane" },
         tab === "market" ? h(MarketTab, { notify, markets, onMutation: refreshViews, ops, favorites, profileKind: profile?.kind ?? null, onOpenOps: openOps }) : null,
         tab === "installed" ? h(InstalledTab, { notify, installed, updates, onMutation: refreshViews, ops }) : null,
         tab === "settings" ? h(SettingsTab, {
@@ -4144,6 +4155,7 @@ function MarketPanel({ onClose }) {
           },
         }) : null,
         // 操作记录已整体搬迁至设置 tab 末位通宽卡（0.9.x 布局重构·第二批）：底部不再常驻
+        ),
       ),
         // toast/横幅 overlay 化（2026-10-13 UX 修复）：原先是面板 column flex 的流内子元素，
         // 出现/消失会压缩 body(flex:1) 造成二次抖动；现挂 absolute 底部浮层（.dshm-banner-stack），

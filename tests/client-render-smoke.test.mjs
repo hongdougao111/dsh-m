@@ -467,3 +467,14 @@ describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结�
     assert.ok(src.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
   })
 })
+
+describe('tab 切换淡入（0.9.88）——pane 重挂动画 + body 节奏复刻 + reduced-motion 关闸', () => {
+  it('pane 包裹层在且 key 绑定 tab（重挂触发动画重放）', () => {
+    assert.ok(src.includes('{ key: tab, className: "dshm-tabpane" }'), 'key={tab} pane 在')
+  })
+  it('动画只动 opacity 且 reduced-motion 一票关闭；pane 复刻 body gap 节奏', () => {
+    assert.ok(src.includes('@keyframes dshm-tabfade{from{opacity:0}}'), 'keyframes 在')
+    assert.ok(src.includes('.dshm-tabpane{display:flex;flex-direction:column;gap:12px;animation:dshm-tabfade .16s ease}'), 'pane 复刻 body flex-column+gap:12px')
+    assert.ok(src.includes('@media (prefers-reduced-motion:reduce){.dshm-tabpane{animation:none}}'), 'reduced-motion 关闸在')
+  })
+})
