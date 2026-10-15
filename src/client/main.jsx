@@ -622,7 +622,7 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px;padding-top:6px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);font-size:11px;color:var(--dsw-alias-label-caption,#6b7280)}
 .dshm-links-k,.dshm-links-sep{color:var(--dsw-alias-label-caption,#9ca3af)}
 .dshm-links a{color:var(--dsw-alias-state-business-primary,#4d6bfe);text-decoration:none;font-weight:500}
-.dshm-links-ver{font-weight:500;color:var(--dsw-alias-label-secondary,#4b5563);font-variant-numeric:tabular-nums}
+.dshm-links-ver{font-weight:500;color:var(--dsw-alias-label-caption,#6b7280);font-variant-numeric:tabular-nums}
 .dshm-links a:hover{text-decoration:underline}
 .dshm-prog{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#4b5563)}
 .dshm-prog .bar{flex:1;height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-2,rgba(38,49,72,.08));overflow:hidden;min-width:80px}
