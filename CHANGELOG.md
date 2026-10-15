@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.89 优化：两行态头部视觉恒定——完整标题保留 + winctl 尺寸/行高不随断点跳变
+
+- **需求（2026-10-15，主人真机反馈）**：0.9.88 的 720 断点两行重排带来两处可感知跳变——标题在「插件市场 ↔ DeepSeek Harness 插件市场」间换字；右上角 winctl 按钮忽大忽小（28↔36px），且标题/按钮垂直位置跨断点漂移 1–2px，来回拖拽「一跳一跳」。
+- **方案**：① 两行态保留完整标题——seg 让行后首行空间充裕（640 宽实测 612px 内容区只需 ~300px），短标题切换退役（DOM 双 span 与基础隐藏规则保留，极端窄由 nowrap+ellipsis 兜底）；② winctl 触控 36px 从容器断点迁 `pointer:coarse`（按钮大小跟随输入方式而非宽度：鼠标恒 28px、触屏恒 36px）；③ winctl 盒钉 34px = seg 行高（按钮 28 + 边框 2 同源公式），单行/两行第一行高度归一。
+- **验证**：全量 1496 测试全绿、typecheck 零错误；CDP 实测跨断点标题/按钮垂直中心 delta 0.0px（修复前 -1~-2px）；主人真机验收通过。
+- **杂项**：package-lock 根版本字段自 0.9.68 起历届发版漏改，本次补齐至当前版本并纳入发版流程。
+
 ### 0.9.88 特性：面板三区 resize——尺寸记忆 + 就地生长（ADR-0021）+ 验收三修
 
 - **需求（2026-10-15）**：市场面板「920px 浏览卡片太挤、全屏又太大」的真实档位空洞 + 桌面窗口本能手势（下意识移向边缘想 resize）。`/grill-with-docs` 两轮锁定设计：三区手柄（右/下/右下角）、就地生长锚定、尺寸记忆全套；实施计划经独立评审 Agent 三轮对抗审核（计划 11 条 + 执行 2 条全闭环，含两条方法论沉淀：`treeShaking:false` 下「bundle 标识符缺席」类预言必假、esbuild 默认 charset=ascii 下中文 bundle 锚必假）。
@@ -623,7 +630,14 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## English
 
-### Feature in 0.9.88 — three-zone panel resize: size memory + grow-in-place (ADR-0021) + acceptance fixes
+### Polish in 0.9.89 — constant two-row head: full title kept, winctl size/row height independent of the breakpoint
+
+- **Need (2026-10-15, live feedback)**: the 720px two-row reflow shipped in 0.9.88 introduced two perceptible jumps — the title swapped between "插件市场" and "DeepSeek Harness 插件市场", and the winctl buttons changed size (28↔36px) while title/button vertical positions drifted 1–2px across the breakpoint.
+- **Approach**: ① the two-row state keeps the full title — with seg moved to its own row the first row has ample room (~300px used of 612px at 640 width), so the short-title swap retires (DOM spans and base hiding kept; nowrap+ellipsis covers extreme narrow); ② the winctl touch bump (36px) moved from the container breakpoint to `pointer:coarse` (button size follows input modality, not width: mouse always 28px, touch always 36px); ③ the winctl box pinned to 34px = seg row height (same 28+2-border formula), normalizing first-row height across both modes.
+- **Verification**: full suite 1496 green, typecheck clean; CDP measurement shows 0.0px vertical-center delta for title and buttons across the breakpoint (was -1~-2px); accepted on-device by the owner.
+- **Misc**: package-lock root version fields, unsynced since 0.9.68, now track the release version and join the release checklist.
+
+### 0.9.88 — three-zone panel resize: size memory + grow-in-place (ADR-0021) + acceptance fixes
 
 - **Need (2026-10-15)**: a real gap between "cramped at 920px" and "overkill fullscreen", plus the instinctive desktop gesture of grabbing window edges. Design locked via two grill rounds: three handles (right/bottom/bottom-right), grow-in-place anchoring, full size memory; the implementation plan survived three independent adversarial review rounds (11 plan + 2 execution issues all closed, including two methodology findings: bundle-absence predictions are structurally false under `treeShaking:false`, and CJK bundle anchors are false under esbuild's default ascii charset).
 - **Approach (ADR-0021)**: ① DOM-free `window-resize.js` — `clampSize` (min 640×460, viewport−8px margins, an origin second clamp keeping right/bottom edges inside margins for the freely-positioned form, degraded bounds on tiny viewports) + size-memory storage symmetric to position memory; ② gesture state machine mirrors ADR-0017 (rAF-batched writes, zero setState in gesture frames, setPointerCapture, primary-button guard, multi-pointer guard, unmount cleanup); ③ hot zones 6/8px edges + 14×14 corner, cursor-only affordance, four exemptions (fullscreen / narrow viewport / touch / scrollbar trade-off); ④ reclamp upgraded to size-first-then-position.
