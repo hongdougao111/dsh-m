@@ -329,6 +329,17 @@ const CSS = `
    DSH Web / 浏览器无此变量 → 回落 0px，行为与旧版逐字节一致。 */
 .dshm-overlay.full{padding:0;top:var(--dsh-windows-titlebar-height,0px)}
 .dshm-panel.full{width:100%;height:100%;border-radius:0}
+/* resize 热区（panel resize）：透明贴内缘（面板 overflow:hidden 不可外置）。
+   边 6/8px、角 14×14（Q8 定稿 12–16px 带内；扫描期可校准）。右热区盖住 .dshm-body
+   纵向滚动条外缘 ~6px（余 ~9px 可拖）、角热区与滚动条 corner 死区基本重合（Q4 接受）。
+   cursor 即全部供性——无视觉控件（Q8）。z-index 压过 body 内容但不进头部交互区
+   （head padding 14px > 6px 热区，winctl 按钮无碰撞）。 */
+.dshm-rz{position:absolute;z-index:5;touch-action:none}
+.rz-e{top:0;right:0;width:6px;height:100%;cursor:ew-resize}
+.rz-s{bottom:0;left:0;width:100%;height:8px;cursor:ns-resize}
+.rz-se{right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize}
+.dshm-panel.full .dshm-rz{display:none} /* belt ①：全屏态手柄不渲染，CSS 兜底 */
+@media (pointer:coarse){.dshm-rz{display:none}} /* belt ②：coarse 指针整组隐藏（Q8） */
 /* 窗口控制组（0.7.7）：最大化/关闭连体按钮组——等宽两格 + 发丝分隔线，统一线条图标 */
 /* 窗口控制组（0.7.7/0.7.8）：最大化/关闭连体按钮组——透明底 + 发丝外框，与搜索清除钮同一配色语言；宽格防误触 */
 .dshm-winctl{display:inline-flex;align-items:stretch;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:9px;background:transparent;overflow:hidden;flex:none}

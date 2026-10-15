@@ -102,3 +102,36 @@ describe("尺寸记忆存取语义（与 window-drag 逐字对称）", () => {
     assert.equal(loadPanelSize(null), null);
   });
 });
+
+/**
+ * bundle 锚（T5 Step 5）：lib/client.js 不入库——本 describe 前置 npm run build
+ * （npm test 的 pretest 自动 build）；裸检出上守卫 skip，不算失败。
+ * 锚纪律（评审 R1-1/R2-1）：esbuild treeShaking:false + 默认 charset=ascii——
+ * bundle 锚只允许 ASCII 字符串字面量（中文一律源结构锚）；计数一律出现次数语义。
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+describe("bundle 锚（需先 npm run build）", { skip: !existsSync(join(dirname(fileURLToPath(import.meta.url)), "..", "lib", "client.js")) && "lib/client.js 不存在——先 npm run build（npm test 的 pretest 会自动 build）" }, () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const bundle = readFileSync(join(root, "lib", "client.js"), "utf8");
+  const count = (needle) => bundle.split(needle).length - 1;
+
+  it("正向锚（ASCII 字面量）各 ≥1", () => {
+    for (const anchor of ["data-dshm-resize", ".rz-se{", "ew-resize", "ns-resize", "nwse-resize", "pointer:coarse", "dshm-panel-size", "Drag edges to resize"]) {
+      assert.ok(count(anchor) >= 1, `bundle 应含 ${anchor}，实际 0`);
+    }
+  });
+  it("负向锚：不得有人偷懒换 CSS resize:both", () => {
+    assert.equal(count("resize:both"), 0);
+  });
+  it("手柄计数：DOM 3 + CSS 规则 3 = 6（评审 R2 语义校准）", () => {
+    assert.equal(count("dshm-rz"), 6, `dshm-rz 应为 6 次（3 DOM + 3 CSS），实际 ${count("dshm-rz")}`);
+  });
+  it("中文文案走源结构锚（bundle 内中文被 ascii 转义，禁作 bundle 锚）", () => {
+    const src = readFileSync(join(root, "src", "client", "main.jsx"), "utf8");
+    assert.ok(src.split("拖边角调大小").length - 1 >= 1, "main.jsx 应含中文提示语（源锚）");
+    assert.equal(bundle.includes("拖边角调大小"), false, "bundle 内该中文应已被 \\uXXXX 转义（机理自证）");
+  });
+});
