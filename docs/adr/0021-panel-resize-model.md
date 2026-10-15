@@ -22,9 +22,9 @@
 ## Consequences
 
 - **性能预期**：resize 每帧 = 一次 width/height 写 → 整帧 layout（含容器查询与 auto-fit 网格重排、chips ResizeObserver 重测），无 transform 合成器通道；~30–60 卡片规模实测可接受（60fps 预算内），弱机若报告掉帧再评估（候选优化：resize 中给卡片网格降级渲染）。静止态零额外监听（手势期才挂 document 级）。
-- **验收门**：全量测试 ≥1493（T1–T5 实测 14+4 新增，基线 1472）；typecheck 零错误；bundle 锚表（ASCII 限定）+ 源结构锚（`savePanelSize` ≥2 处、中文提示语源锚 ≥1）全过；Task 7 扫宽矩阵（640/720/760/920/1000/1120/1300/满宽 × 五视图，**920 像素级不变**）全绿。
+- **验收门**：全量测试 ≥1493（T1–T5 实测 14+4 新增，基线 1472；终态 1496 = +21 resize +3 三修）；typecheck 零错误；bundle 锚表（ASCII 限定）+ 源结构锚（`savePanelSize` ≥2 处、中文提示语源锚 ≥1）全过——以上机器可复核部分实测通过（评审 Agent 抽检复核在案）。**扫宽矩阵未逐格量化验收**（评审 E1-1 定谳：本卡初版「矩阵全绿」表述跑在证据前面，以此勘误为准）：需求方真机日常实测覆盖 640 头部 / 宽还原设置页 / 详情 Modal 三格并产出三修（commit 513005c）；其余格子（920 像素级量化、1000/1120 过渡点、高度 460、Performance 零 React commit、Win 壳冒烟）**延后**，与发版门（T8 解冻）合并执行；逐格诚实状态见验收记录 `01_docs/research/2026-10-15-dshm-panel-resize-sweep-record.md`。
 - **行为零变化承诺（ADR-0017 承诺的收窄版）**：无尺寸记忆时面板几何与内容布局与旧版一致；DOM 多出三个 `aria-hidden` 透明热区节点（无视觉差异）——「逐字节一致」对几何与样式成立、对 DOM 节点数不成立。
 - **验证锚纪律（评审沉淀，未来计划的通用教训）**：本仓库 build 为 `treeShaking:false` + esbuild 默认 charset=ascii——「bundle 中标识符缺席」与「bundle 中 grep 得到中文」两类预言确定性为假；验证锚只允许源结构锚与 ASCII 字面量正/负锚，量化一律出现次数语义。
-- **GLOSSARY**：新增「尺寸记忆（Size Memory）」「就地生长（Grow-in-Place）」、修订「还原态（Restore State）」三词条（设计共识期已入档，随本卡 docs commit 提交）。
+- **GLOSSARY**：新增「尺寸记忆（Size Memory）」「就地生长（Grow-in-Place）」、修订「还原态（Restore State）」三词条（设计共识期已入档）。（勘误 2026-10-15，评审 E1-2：词条实际随 T2 commit 6d5585b 入库——执行取舍为避免「词条滞后于代码」的窗口期；本卡 commit message「GLOSSARY 词条入库」措辞与事实不符，以本勘误为准，历史 commit 不重写。）
 - **反哺候选（不在本卡范围）**：位置记忆与尺寸记忆的存储读写已高度对称，未来如加「重置窗口」入口可一并清两键；quota-watch 胶囊如需 resize 可直接复用 window-resize.js（契约零耦合 DOM）。
 - **发布形态**：v1 随 0.9.88 发版（发版动作待需求方人工审核后执行，不入自动化）。
