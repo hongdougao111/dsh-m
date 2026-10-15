@@ -441,3 +441,29 @@ describe('panel resize 渲染接线（T2）——三手柄 restore 在/full 无 
     assert.ok(!bare.includes('width:1200px'), '无记忆渲染不得出现 1200 内联宽')
   })
 })
+
+describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结构 / 设置网格容器门控', () => {
+  it('头部两行重排断点 600→720（resize min 640 恒入两行区）；title/seg 基础 nowrap 防挤压带', () => {
+    assert.ok(src.includes('@container (max-width:720px){'), '容器断点 720 在')
+    assert.ok(!src.includes('@container (max-width:600px){'), '旧 600 容器断点已退役')
+    assert.ok(src.includes('.dshm-title{font-weight:600;font-size:15px;margin-right:2px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}'), 'title nowrap+ellipsis 在（flex 子项块化，ellipsis 生效）')
+    assert.ok(src.includes('display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}'), 'seg button 基础 nowrap 在')
+    assert.ok(src.includes('@media (max-width:600px){.dshm-overlay{padding:8px}}'), '视口 600 overlay 断点不动')
+  })
+
+  it('详情弹窗：✕ 与「安装」双端常驻（modalbody 结构化滚动）', () => {
+    assert.ok(src.includes('className: "dsvm-modalbody"'), 'body 包裹层在')
+    assert.match(src, /\.dsvm-modalbox\{[^}]*overflow:hidden/, 'box 攂滚动改 hidden')
+    assert.ok(!/\.dsvm-modalbox\{[^}]*overflow:auto/.test(src), 'box 不再整体滚动')
+    assert.match(src, /\.dsvm-modalbody\{overflow:auto;min-height:0;overscroll-behavior:contain/, 'body 滚动 + min-height:0 + 防链式在')
+    const m = src.slice(src.indexOf('function DetailModal('), src.indexOf('// ---------- 市场页'))
+    assert.ok(m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-kv') && m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-modalactions'), 'body 包住 kv 到 actions 之前的中段')
+  })
+
+  it('设置网格三列门控 = 容器宽 ≥1100 而非全屏（panel resize 伴生修复）', () => {
+    assert.ok(src.includes('@container (min-width:1100px){'), '容器门控在')
+    assert.ok(src.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}'), '三列规则在（容器版）')
+    assert.ok(!src.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}'), '.full 三列规则已退役')
+    assert.ok(src.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
+  })
+})

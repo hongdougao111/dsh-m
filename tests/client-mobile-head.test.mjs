@@ -12,7 +12,7 @@ const src = readFileSync(join(root, "src/client/main.jsx"), "utf8");
 test("0.9.83 容器查询载体与断点（共识 Q1/Q2/Q3）", () => {
   assert.ok(src.includes("@supports (container-type: inline-size)"), "@supports 兜底在");
   assert.ok(src.includes(".dshm-panel{container-type:inline-size}"), "面板容器声明在");
-  assert.ok(src.includes("@container (max-width:600px){"), "容器断点 600 在");
+  assert.ok(src.includes("@container (max-width:720px){"), "容器断点 720 在（0.9.88 起与视口 600 解耦：resize min 640 恒入两行区）");
   assert.ok(src.includes("@media (max-width:600px){.dshm-overlay{padding:8px}}"), "overlay 窄视口 8px 在");
   assert.ok(src.includes(".dshm-title-short{display:none}"), "短标题基础隐藏（老浏览器逐字节同旧版）");
 });

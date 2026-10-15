@@ -349,10 +349,10 @@ const CSS = `
 .dshm-winctl button:active{background:var(--dsw-alias-fill-secondary,rgba(127,127,127,.2))}
 .dshm-winctl button.danger:hover{background:#e5484d;color:#fff}
 .dshm-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
-.dshm-title{font-weight:600;font-size:15px;margin-right:2px}
+.dshm-title{font-weight:600;font-size:15px;margin-right:2px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dshm-head-divider{width:1px;height:18px;background:var(--dsw-alias-border-l2,#e5e7eb);flex:none}
 .dshm-seg{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--dsw-alias-border-l2,#e2e4e8);border-radius:9px;background:var(--dsw-alias-bg-layer-1,#f5f6f8)}
-.dshm-seg button{appearance:none;border:0;background:transparent;height:28px;padding:0 14px;border-radius:7px;font:inherit;font-size:12px;color:var(--dsw-alias-label-tertiary,#7b8088);cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .15s,color .15s,box-shadow .15s}
+.dshm-seg button{appearance:none;border:0;background:transparent;height:28px;padding:0 14px;border-radius:7px;font:inherit;font-size:12px;color:var(--dsw-alias-label-tertiary,#7b8088);cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}
 .dshm-seg button:hover{color:var(--dsw-alias-label-secondary,#4b5058)}
 .dshm-seg button.on{background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#17191c);font-weight:600;box-shadow:var(--dsw-shadow-lv1,0 2px 8px rgb(20 24 32 / 8%))}
 .dsvm-filterbtn{appearance:none;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-elevated,transparent);color:var(--dsw-alias-label-secondary,#4b5563);border-radius:8px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:color .15s,border-color .15s,background .15s}
@@ -428,7 +428,8 @@ const CSS = `
 .dsvm-pagebtn.on{border-color:var(--dsw-alias-interactive-bg-selected,#4f46e5);color:var(--dsw-alias-interactive-bg-selected,#4f46e5);font-weight:600}
 .dsvm-pagebtn:disabled{opacity:.4;cursor:default}
 .dsvm-modal{position:fixed;inset:0;z-index:2147483100;background:var(--dsw-alias-bg-mask-3,rgba(15,23,42,.55));display:flex;align-items:center;justify-content:center;padding:24px 16px}
-.dsvm-modalbox{width:min(720px,100%);max-height:86vh;overflow:auto;background:var(--dsw-alias-bg-elevated,#fff);background:color-mix(in srgb,var(--dsw-alias-bg-base,#fff) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(2,6,23,.25);padding:16px;display:flex;flex-direction:column;gap:10px}
+.dsvm-modalbox{width:min(720px,100%);max-height:86vh;overflow:hidden;background:var(--dsw-alias-bg-elevated,#fff);background:color-mix(in srgb,var(--dsw-alias-bg-base,#fff) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(2,6,23,.25);padding:16px;display:flex;flex-direction:column;gap:10px}
+.dsvm-modalbody{overflow:auto;min-height:0;overscroll-behavior:contain;display:flex;flex-direction:column;gap:10px}
 .dsvm-modalhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dsvm-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px;margin:0}
 .dsvm-kv dt{color:var(--dsw-alias-label-caption,#6b7280);white-space:nowrap}
@@ -581,8 +582,13 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-settings-grid>.dshm-section{margin:0;min-width:0}
 .dshm-settings-grid>.dshm-section:nth-child(3){grid-column:1/-1}
 .dshm-settings-grid>.dshm-ops-card{grid-column:1/-1}
-.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}
-.dshm-panel.full .dshm-settings-grid>.dshm-section:nth-child(3){grid-column:auto}
+/* 三列制门控 = 容器宽度而非全屏态（0.9.88，panel resize 伴生修复）：还原态可拉到
+   任意宽，≥1100px 时「关于」升第三列（约 230px 宽，kv 行放得下）；顺带修正旧账——
+   小视口全屏（<1100）不再被强塞三列，回落两列。≤760px 视口单列媒体查询原样保留。 */
+@container (min-width:1100px){
+  .dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}
+  .dshm-settings-grid>.dshm-section:nth-child(3){grid-column:auto}
+}
 @media (max-width:760px){.dshm-settings-grid,.dshm-panel.full .dshm-settings-grid{grid-template-columns:minmax(0,1fr)}.dshm-settings-grid>.dshm-section:nth-child(3),.dshm-settings-grid>.dshm-ops-card{grid-column:1/-1}}
 .dshm-kvlines{display:flex;flex-direction:column}
 .dshm-kvline-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.14));min-width:0}
@@ -694,8 +700,10 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
    视口宽 ≠ 面板宽（600px 视口→568px 面板仍溢出）；容器查询跟随面板实际宽度。面板宽高
    均为 min(920px,100%)/min(680px,86vh) 公式派生、不依赖内容，inline-size 包含安全；
    灯箱 portal 挂 body（0.9.73）、分类行 sticky 在 .dshm-body 滚动容器内，均不受祖先
-   inline-size 包含影响。断点：容器 600px（两行重排）与视口 600px（默认全屏判定 +
-   overlay 8px）同值。
+   inline-size 包含影响。断点：容器 720px（两行重排）与视口 600px（默认全屏判定 +
+   overlay 8px）——两断点 0.9.88 起解耦：panel resize 的 min 640 落在 601–720 带时旧
+   600px 断点不触发，长标题折行/seg 挤压（主人实测 2026-10-15），720 断点让 min 恒入
+   两行区；副作用 = 600–720px 视口的手机全屏也两行，属修复而非回归。
    兜底语义说明（共识 Q3 + 评审 R7）：「不支持容器查询的浏览器新规则零生效」按 CSS
    条件规则组机制等效落地——.dshm-title-short 基础隐藏不依赖容器查询（老浏览器也要
    生效）；其余新规则都是整块 at-rule（@supports/@container/@media 顶层兄弟），不支持
@@ -709,7 +717,7 @@ button.dshm-dshchip:disabled{cursor:default;opacity:.75}
 /* 两行重排：行1 [短标题 ⋯spacer⋯ chip winctl]，行2 [seg 拉通]。DOM 顺序不动
   （title→divider→seg→spacer→chip→winctl），全靠 order+wrap——源锚/tab 序/读屏序
   零扰动；视觉序与 DOM 序不一致（seg 在 DOM 前、视觉在后），面板内元素少可接受 */
-@container (max-width:600px){
+@container (max-width:720px){
   .dshm-head{flex-wrap:wrap;row-gap:6px}
   .dshm-head-divider{display:none}
   .dshm-title-full{display:none}
@@ -1739,6 +1747,12 @@ function DetailModal({ it, labels, busy, onClose, onInstall, onUpgrade, upgradeB
         h("span", { className: "dshm-spacer" }),
         h("button", { ref: closeRef, className: "dshm-xbtn", "aria-label": lookup("common.close"), title: lookup("common.close"), onClick: onClose }, h(XIcon)),
       ),
+      // 0.9.88（T7 验收·主人反馈二）：中段内容包进 modalbody 滚动层——✕（head）与
+      // 「安装」（actions）双端常驻，README/能力披露展开多长都关得上、装得了；
+      // box 攂 overflow:hidden，滚动收进 body（overscroll-behavior 防链式透传底页）。
+      h(
+        "div",
+        { className: "dsvm-modalbody" },
       it.community === true
         ? h(
             "div",
@@ -1828,6 +1842,7 @@ function DetailModal({ it, labels, busy, onClose, onInstall, onUpgrade, upgradeB
       installNote && installNote.kind === "ok"
         ? h("div", { key: "opnote-rh", className: "dshm-hint" }, lookup(profileKind === "desktop" ? "profile.restartHint" : "banner.done"))
         : null,
+      ),
       h(
         "div",
         { className: "dsvm-modalactions" },
@@ -2894,7 +2909,7 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
           kvlineRow("settings.community.count", communityLive ? lookup("settings.community.count.v", { n: communitySummary.acceptedCount ?? 0, up: communitySummary.upstreamCount ?? "—" }) : "—"),
           kvlineRow("settings.community.displaced", communityLive ? lookup("settings.community.displaced.v", { n: communitySummary.displaced ?? 0 }) : "—"),
         );
-  // 两清单并排（终审 2026-10-09 mock 定稿）：常态 4:7；全屏关于升三卡行（4:7:3，不封顶）；≤760px 单列
+  // 两清单并排（终审 2026-10-09 mock 定稿；0.9.88 门控改容器宽）：常态 4:7；容器 ≥1100px 关于升三卡行（4:7:3，不封顶）；≤760px 视口单列
   return h(
     "div",
     { className: "dshm-settings-grid" },
