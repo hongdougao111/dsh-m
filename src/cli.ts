@@ -244,7 +244,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
       // metadata-only：不构造全量 latest；0.9.92 三端查询文法：category/source/limit/offset 经
       // market-query 单一入口归一（与 host-api/工具同源同语义）；文法违规 throw 直飞 dispatch 统一
       // catch（`错误：${msg}` + exit 1，与此前 source 内联报错输出逐字节同款）——非法 category
-      // 自此显式报错（0.9.91 前静默空结果吞错，回归钉例在 cli-search.test.mjs）。
+      // 自此显式报错（≤0.9.91 静默空结果吞错，回归钉例在 cli-search.test.mjs）。
       // 双源判定：主清单 unavailable 但社区有条目 → 照常出页（Q42）；两层皆不可用 → exit 1
       const intake = parseMarketQueryInput(
         { category: flags.category, source: flags.source, limit: flags.limit, offset: flags.offset },
