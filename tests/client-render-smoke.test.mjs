@@ -460,10 +460,10 @@ describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结�
     assert.ok(m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-kv') && m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-modalactions'), 'body 包住 kv 到 actions 之前的中段')
   })
 
-  it('设置网格三列门控 = 容器宽 ≥1100 而非全屏（panel resize 伴生修复）', () => {
+  it('设置网格三列门控 = 容器宽 ≥1100 而非全屏（panel resize 伴生修复；0.9.91 三列 4:7:4 左右窄卡等宽）', () => {
     assert.ok(src.includes('@container (min-width:1100px){'), '容器门控在')
-    assert.ok(src.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}'), '三列规则在（容器版）')
-    assert.ok(!src.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}'), '.full 三列规则已退役')
+    assert.ok(src.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '三列规则在（容器版，4:7:4）')
+    assert.ok(!src.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '.full 三列规则已退役')
     assert.ok(src.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
   })
 })

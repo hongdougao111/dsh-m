@@ -583,10 +583,11 @@ button.dshm-badge:hover{filter:brightness(.95)}
 .dshm-settings-grid>.dshm-section:nth-child(3){grid-column:1/-1}
 .dshm-settings-grid>.dshm-ops-card{grid-column:1/-1}
 /* 三列制门控 = 容器宽度而非全屏态（0.9.88，panel resize 伴生修复）：还原态可拉到
-   任意宽，≥1100px 时「关于」升第三列（约 230px 宽，kv 行放得下）；顺带修正旧账——
-   小视口全屏（<1100）不再被强塞三列，回落两列。≤760px 视口单列媒体查询原样保留。 */
+   任意宽，≥1100px 时「关于」升第三列；顺带修正旧账——
+   小视口全屏（<1100）不再被强塞三列，回落两列。≤760px 视口单列媒体查询原样保留。
+   0.9.91 三列 4:7:3 → 4:7:4（主人 2026-10-16 定稿）：左右窄卡等宽，视觉对称。 */
 @container (min-width:1100px){
-  .dshm-settings-grid{grid-template-columns:4fr 7fr 3fr}
+  .dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}
   .dshm-settings-grid>.dshm-section:nth-child(3){grid-column:auto}
 }
 @media (max-width:760px){.dshm-settings-grid,.dshm-panel.full .dshm-settings-grid{grid-template-columns:minmax(0,1fr)}.dshm-settings-grid>.dshm-section:nth-child(3),.dshm-settings-grid>.dshm-ops-card{grid-column:1/-1}}
@@ -2915,7 +2916,7 @@ function SettingsTab({ notify, onRegistryChanged, onForceMarket, opsRecords, onO
           kvlineRow("settings.community.count", communityLive ? lookup("settings.community.count.v", { n: communitySummary.acceptedCount ?? 0, up: communitySummary.upstreamCount ?? "—" }) : "—"),
           kvlineRow("settings.community.displaced", communityLive ? lookup("settings.community.displaced.v", { n: communitySummary.displaced ?? 0 }) : "—"),
         );
-  // 两清单并排（终审 2026-10-09 mock 定稿；0.9.88 门控改容器宽）：常态 4:7；容器 ≥1100px 关于升三卡行（4:7:3，不封顶）；≤760px 视口单列
+  // 两清单并排（终审 2026-10-09 mock 定稿；0.9.88 门控改容器宽）：常态 4:7；容器 ≥1100px 关于升三卡行（0.9.91 起 4:7:4，左右窄卡等宽）；≤760px 视口单列
   return h(
     "div",
     { className: "dshm-settings-grid" },
