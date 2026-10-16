@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.90 性能：搜索归一化冷路径单遍化——世代冷搜索 ~330ms → 99ms p50（宿主事件循环最后一块 >100ms 停摆清除）+ CLI search 位置参数修复
+
+- **问题（2026-10-16 走查 + 评审实测）**：物化合并市场（ADR-0016）每个世代的**首次搜索**仍同步阻塞宿主事件循环 ~324–364ms——`normalizeSearchText` 逐字符双 regex 分类 + 收尾全量 regex replace 两遍扫描（全语料 256.8ms，NFKC 仅 13.6ms）+ `fieldText` 每字段三次数组分配；触发频率 = 每小时 registry SWR 换代（fetchedAt 无条件 bump）+ 每次宿主重启 + 每日目录换版后的第一次搜索，agent `dshm_search` 同路径。另：`dshm search 主题` 的位置参数被 parseArgs 静默丢弃（query=undefined → 无评分浏览整页）。
+- **方案**：① `normalizeSearchText` 激进单遍化——ASCII 查表 + CJK 稳定核四区间直判（4E00–9FA5 / 3400–4DB5 / F900–FA6D / FA70–FAD9，Unicode 赋值稳定性 → 与运行时版本无关）+ 非词符运行就地折叠（收尾全量 replace 退役）+ astral 词对透明规则；FA 段 40 个未赋值洞（U+FA6E/FA6F/FADA–FAFF）与版本敏感缘一律回退 WORD_RE/CJK_RE（同谓词同运行时，等价由构造保证）；② `fieldText` 单元素快路（join([n])===n 恒等，免三次数组分配）；③ CLI 首个位置参数等价 `--query`（flag 优先、`--query` 缺值宽容回退、help 同步）。
+- **等价红线**：golden 差分语料 3888 条（分层抽样 + mulberry32 种子 fuzz 含 astral/NFKC/FA 洞/lone surrogate 池 + 手写 quirk 钉 11 例）零 mismatch——𝕏 的 NFKC→ASCII 折叠、FA 段洞折叠、lone surrogate 折叠、astral 转角不触发等现行为**逐字节原样**（评审独立加固：839,295 例差分零 mismatch）；mismatch 一律修实现、绝不改 fixture。生成器与计时探针入库（手动跑不进 CI；mulberry32 确定性 + 目录版本数值比较取最新，同 seed 再生同语料）。
+- **验证**：全量 1506 测试全绿、typecheck 零错误；实测（本机空闲）：纯函数全语料 256.8→**44.5ms**（5.8×）；世代冷搜索 324–364 → **99.3ms p50**（3.3×；首跑 JIT 冷 120.2ms 单列）；E2E 重启场景 ~500 → **348.6ms**、小时场景 ~380 → **207.2ms**（builds delta=1，换代确实发生）；评审独立复现 91.5–96.2 / 45.1–45.8ms。实施计划经独立评审 Agent 四轮对抗审核收敛（计划 R1–R3 + 执行 R4），四项验收口径全部达成。
+
 ### 0.9.89 优化：两行态头部视觉恒定——完整标题保留 + winctl 尺寸/行高不随断点跳变
 
 - **需求（2026-10-15，主人真机反馈）**：0.9.88 的 720 断点两行重排带来两处可感知跳变——标题在「插件市场 ↔ DeepSeek Harness 插件市场」间换字；右上角 winctl 按钮忽大忽小（28↔36px），且标题/按钮垂直位置跨断点漂移 1–2px，来回拖拽「一跳一跳」。
@@ -629,6 +636,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Performance in 0.9.90 — single-pass search normalization cold path: per-generation cold search ~330ms → 99ms p50 (last >100ms stall on the host event loop cleared) + CLI search positional fix
+
+- **Problem (2026-10-16 walk + review measurements)**: the first search of every materialized merged-market generation (ADR-0016) still blocked the DSH host event loop synchronously for ~324–364ms — `normalizeSearchText`'s per-char dual-regex classification plus a trailing full-scan regex replace (256.8ms over the full corpus; NFKC is only 13.6ms), plus three array allocations per field in `fieldText`. Triggered hourly by registry SWR generation churn (fetchedAt bumps unconditionally), after every host restart, and on the first search after each daily catalog bump — the agent `dshm_search` tool rides the same path. Also: `dshm search 主题` silently dropped the positional keyword (query=undefined → unranked browse page).
+- **Approach**: ① aggressive single-pass `normalizeSearchText` — ASCII lookup table + direct classification for four stable CJK core ranges (4E00–9FA5 / 3400–4DB5 / F900–FA6D / FA70–FAD9; Unicode assignment stability makes them independent of the runtime's Unicode version) + in-pass collapsing of non-word runs (the trailing full-scan replace retires) + a transparent astral word-pair rule; the 40 unassigned FA holes (U+FA6E/FA6F/FADA–FAFF) and version-sensitive edges always fall back to WORD_RE/CJK_RE (same predicate, same runtime — equivalence by construction); ② single-element fast path in `fieldText` (join([n])===n identity, no triple allocations); ③ CLI positional keywords now equal `--query` (flag wins, a valueless `--query` falls back leniently, help updated).
+- **Equivalence red line**: a 3,888-case golden differential corpus (stratified sampling + seeded fuzz with astral/NFKC/FA-hole/lone-surrogate pools + 11 handwritten quirk pins) shows **zero mismatch** — current behaviors such as 𝕏's NFKC→ASCII folding, FA-hole collapsing, lone-surrogate folding, and no-transition astral boundaries are preserved **byte-for-byte** (independently hardened by the reviewer: 839,295 differential cases, zero mismatch); mismatches are always fixed in the implementation, never in the fixture. The corpus generator and timing probe are committed (manual, not CI; mulberry32 determinism + numeric version comparison for catalog selection — same seed regenerates the same corpus).
+- **Verification**: full suite 1506 green, typecheck clean; measured (idle machine): pure function 256.8→**44.5ms** (5.8×); per-generation cold search 324–364 → **99.3ms p50** (3.3×; first JIT-cold run 120.2ms reported separately); E2E restart scenario ~500 → **348.6ms**, hourly scenario ~380 → **207.2ms** (builds delta=1); reviewer reproduction 91.5–96.2 / 45.1–45.8ms. The implementation plan converged through four adversarial review rounds (plan R1–R3 + execution R4); all four acceptance criteria passed.
 
 ### Polish in 0.9.89 — constant two-row head: full title kept, winctl size/row height independent of the breakpoint
 
