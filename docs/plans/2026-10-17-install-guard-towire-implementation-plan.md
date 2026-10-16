@@ -71,11 +71,11 @@
 ### Task 2: 五处投影接线
 
 - 目标：5 处手写投影替换为一行展开；钉住套件零迁移全绿。
-- 涉及文件：`src/core/host-api.ts`（:239-256）、`src/tools.ts`（:304、:468）、`src/cli.ts`（:383、:408）。
+- 涉及文件：`src/core/host-api.ts`（InstallGuardError 分支 :238-253）、`src/tools.ts`（:304、:468）、`src/cli.ts`（:383、:408）。
 - 接口契约：
   - Consumes: `toWire()`（Task 1）。
   - Produces: 无下游依赖。
-- 验证范围：5 套件 + 全量门禁。
+- 验证范围：6 个测试文件（5 个钉住/关联套件 + host-api.test.mjs 含新 409 钉例）+ typecheck。
 
 - [ ] Step 1: host-api InstallGuardError 分支（:238-253，注意 :254-256 起是 IncompatibleError 分支、不在改动面）投影段替换——payload 改 `{ ok: false, error: err.message, ...err.toWire() }`；就地注释保留「GUI 一键重启只读 restartSafe」决策句并补一句「0.9.93 起线格式单源于 toWire」。
 - [ ] Step 2: tools 两处（:304、:468）替换为 `{ ok: false, guard: true, message: err.message, ...err.toWire() }`（两处逐字同款，保留各自上下文注释）。
@@ -121,7 +121,7 @@
 ## 最终验证
 
 - Run: `npm run build && npm test && npm run typecheck`
-- Expected: 全套件绿（5 个钉住套件零迁移是核心判据）、typecheck 零错误。
+- Expected: 全套件绿（6 个涉及测试文件零迁移是核心判据：tools 两臂 execute 钉例 + 新增 host-api 409 钉例 + toWire 单钉例）、typecheck 零错误。
 - Run: `grep -Ec 'repairBasis \? \{ repairBasis: (err|e)\.repairBasis \} : \{\}' src/core/host-api.ts src/tools.ts src/cli.ts`
   - Expected: 三文件合计 **5 → 0**（今日恰 5 处命中即五处投影本体，改后归零；此锚兼作「无第 6 处」证明。勿用裸 `grep -c repairBasis`——tools 渲染侧 :548/:629/:688 合法保留会误报）。
 - 发版门禁 + 审核记录齐备后才算计划完成。
