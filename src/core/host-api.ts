@@ -29,7 +29,7 @@ import { getCommunitySummary } from './community.js'
 import type { RegistryController, RegistryControllerSnapshot } from './registry-controller.js'
 import { RegistryConfigError } from './registry-controller.js'
 import { checkRegistryEntries } from './registry-check.js'
-import { CATEGORIES } from './registry.js'
+import { parseMarketQueryInput, MarketQueryError, type MarketQueryIntake } from './market-query.js'
 import { servingPort, scheduleRestart } from './restart.js'
 import { togglePlugin, ToggleError, type PluginManagerLike } from './toggle.js'
 import { IncompatibleError } from './compat-check.js'
@@ -111,8 +111,6 @@ interface ParsedRequest {
 }
 
 const BODY_MAX_BYTES = 1 << 20
-/** 社区开放分类安全 slug（计划 Task 6；与适配层 COMMUNITY_CATEGORY_RE 同语义） */
-const COMMUNITY_SLUG_RE = /^[a-z0-9-]{1,32}$/
 
 function readBody(req: IncomingMessage, maxBytes = BODY_MAX_BYTES): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -437,29 +435,22 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           // GUI policy：忽略客户端 withLatest，固定 true；limit clamp 1..96、缺省 32
           // （0.7.0 Task 7 探测预算决策：96 为 opt-in 页大小，0.9.28 起默认 32 仍低于 0.6.x 默认 50 的探测负载；
           //  最坏情况被 core 60s deadline 框死为 latestError，不阻塞列表，Q46 不动）
-          const limitRaw = Number(body.limit)
-          const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(96, Math.max(1, Math.floor(limitRaw))) : 32
-          const offsetRaw = Number(body.offset)
-          const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0
-          // category：策展五桶 + 社区开放 slug（非法 slug → 400，不静默吞）
-          const categoryRaw = typeof body.category === 'string' ? body.category.trim() : ''
-          let category: string | null = null
-          if (categoryRaw !== '') {
-            if ((CATEGORIES as readonly string[]).includes(categoryRaw) || COMMUNITY_SLUG_RE.test(categoryRaw)) {
-              category = categoryRaw
-            } else {
-              throw new ApiProtocolError(400, `非法分类: ${categoryRaw}（需精选分类或 [a-z0-9-]{1,32} slug）`)
-            }
+          // 0.9.92 三端查询文法：category/source/limit/offset 经 market-query 单一入口归一（与 tools/CLI
+          // 同源同语义）；双违例顺序统一 category → source → 端本地参数（红线 #6 注记）。
+          let intake: MarketQueryIntake
+          try {
+            intake = parseMarketQueryInput(
+              { category: body.category, source: body.source, limit: body.limit, offset: body.offset },
+              { limitMax: 96, limitDefault: 32 },
+            )
+          } catch (e) {
+            if (e instanceof MarketQueryError) throw new ApiProtocolError(400, e.message)
+            throw e
           }
           // source 分区 + sort（0.7.0 Task 7）：非法值 400（不静默吞）；primaryOnly 已删除——显式拒绝而非静默忽略（审计 #8）
           if (body.primaryOnly !== undefined) {
             throw new ApiProtocolError(400, '参数 primaryOnly 已删除：改用 source（primary/community/all）')
           }
-          const sourceRaw = typeof body.source === 'string' ? body.source.trim() : ''
-          if (sourceRaw !== '' && sourceRaw !== 'primary' && sourceRaw !== 'community' && sourceRaw !== 'all') {
-            throw new ApiProtocolError(400, `非法 source: ${sourceRaw}（需 primary/community/all）`)
-          }
-          const source = sourceRaw === '' ? 'all' : sourceRaw
           let sort: { field: 'downloads' | 'stars' | 'added'; dir: 'asc' | 'desc' } | undefined
           if (body.sort !== undefined && body.sort !== null) {
             const s = body.sort as { field?: unknown; dir?: unknown }
@@ -479,14 +470,14 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           }
           const result = await d.listMarket(cfg(), {
             query: strArg(body, 'query'),
-            category,
-            source,
+            category: intake.category,
+            source: intake.source,
             sort,
             // 0.9.26：GUI 跨区搜索精选稳定前置（listMarket 内部仅在 source='all' 且 query 非空时生效）。
             // 本参数仅 GUI 通道携带——tools/CLI 走各自调用面不传，搜索排序三端同序不变。
             curatedFirst: true,
-            offset,
-            limit,
+            offset: intake.offset,
+            limit: intake.limit,
             force: boolArg(body.force),
             withLatest: true,
             probeMode: probeModeRaw,

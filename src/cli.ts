@@ -20,6 +20,7 @@ import { runDoctor } from './core/doctor.js'
 import { readLauncherPackageVersion } from './core/dsh-version.js'
 import { webProfileDir, desktopProfileDir } from './core/env.js'
 import { loadRegistry, type LoadedRegistry, type RegistryConfig } from './core/registry.js'
+import { parseMarketQueryInput, PRIMARY_CATEGORY_LABELS, SEARCH_CORE_DEADLINE_MS, INSTALLED_CORE_DEADLINE_MS } from './core/market-query.js'
 import { COMMUNITY_CATEGORY_LABELS } from './core/community.js'
 import { scheduleRestart } from './core/restart.js'
 import { upgradeEffectLine } from './core/activation.js'
@@ -27,17 +28,9 @@ import { pathToFileURL } from 'node:url'
 import { realpathSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-/** 分类中文标签（0.7.0 Task 6；0.9.16 策展五桶）：精选策展桶本地表 + 社区已知标签单一事实源；未知 slug 原样。 */
-const CLI_CATEGORY_LABELS: Record<string, string> = {
-  essentials: '装机必备',
-  'cui-picks': '崔添翼精选',
-  'self-dev': 'iasi自研',
-  'tencent-lighthouse': '腾讯轻量云专区',
-  watchlist: '观察区',
-}
-
+/** 分类中文标签（0.9.16 策展五桶）：精选桶单一事实源 market-query PRIMARY_CATEGORY_LABELS + 社区已知标签单一事实源；未知 slug 原样。 */
 function categoryLabelOf(category: string): string {
-  return CLI_CATEGORY_LABELS[category] ?? COMMUNITY_CATEGORY_LABELS[category] ?? category
+  return PRIMARY_CATEGORY_LABELS[category] ?? COMMUNITY_CATEGORY_LABELS[category] ?? category
 }
 
 interface Parsed {
@@ -96,9 +89,7 @@ function cliConfig(): RegistryConfig {
   }
 }
 
-/** 搜索工具 deadline 对齐（Task 7）：CLI 无请求 signal，deadline 44s 与工具侧一致。 */
-const SEARCH_CORE_DEADLINE_MS = 44_000
-const INSTALLED_CORE_DEADLINE_MS = 60_000
+/** 搜索工具 deadline 对齐（Task 7）：CLI 无请求 signal，两个 core deadline 常量单源于 market-query（0.9.92，与工具侧共用）。 */
 
 /** latestErrorCode → 安全化原因（与 tools.ts 同表；CLI 终端呈现）。 */
 function latestErrorCodeReason(code: string | null | undefined): string {
@@ -179,7 +170,7 @@ const HELP = `dshm — DSH Marketplace（DSH 插件市场：精选策展 + 社�
 用法：dshm <命令> [参数]
 
 只读命令：
-  dshm search [关键词] [--query 关键词] [--category market|tools|ui|search|other|<社区slug>] [--source primary|community|all] [--limit N] [--offset N]
+  dshm search [关键词] [--query 关键词] [--category essentials|cui-picks|self-dev|tencent-lighthouse|watchlist|<社区slug>] [--source primary|community|all] [--limit N] [--offset N]
                                         （首个位置参数等价 --query，--query 缺值时也回退它，多余位置参数忽略；source 分区：community=社区目录 4000+ 条 / primary=精选策展 / all=默认；limit 默认 10；offset 翻页）
   dshm list                          列出 web profile 已装插件（含市场标注/可升级）
   dshm outdated                      检查已装插件的最新版本
@@ -250,24 +241,21 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
       return 0
 
     case 'search': {
-      // metadata-only：不构造全量 latest；source/offset/limit 直接交给 core（0.7.0 Task 6：与工具同语义）；
+      // metadata-only：不构造全量 latest；0.9.92 三端查询文法：category/source/limit/offset 经
+      // market-query 单一入口归一（与 host-api/工具同源同语义）；文法违规 throw 直飞 dispatch 统一
+      // catch（`错误：${msg}` + exit 1，与此前 source 内联报错输出逐字节同款）——非法 category
+      // 自此显式报错（0.9.91 前静默空结果吞错，回归钉例在 cli-search.test.mjs）。
       // 双源判定：主清单 unavailable 但社区有条目 → 照常出页（Q42）；两层皆不可用 → exit 1
-      const sourceRaw = typeof flags.source === 'string' ? flags.source : ''
-      if (sourceRaw !== '' && sourceRaw !== 'primary' && sourceRaw !== 'community' && sourceRaw !== 'all') {
-        err(`错误：非法 source: ${sourceRaw}（需 primary/community/all）`)
-        return 1
-      }
-      const source = sourceRaw === '' ? 'all' : sourceRaw
-      const limitRaw = Number(flags.limit)
-      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(80, Math.max(1, Math.floor(limitRaw))) : 10
-      const offsetRaw = Number(flags.offset)
-      const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0
+      const intake = parseMarketQueryInput(
+        { category: flags.category, source: flags.source, limit: flags.limit, offset: flags.offset },
+        { limitMax: 80, limitDefault: 10 },
+      )
       const result: MarketResult = await d.listMarket(cfg, {
         query: typeof flags.query === 'string' ? flags.query : positionals[0],
-        category: typeof flags.category === 'string' ? flags.category : null,
-        source,
-        offset,
-        limit,
+        category: intake.category,
+        source: intake.source,
+        offset: intake.offset,
+        limit: intake.limit,
         withLatest: false,
         namespace: 'cli',
         deadlineMs: SEARCH_CORE_DEADLINE_MS,
@@ -291,6 +279,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
         out(`  ${it.description}`)
       }
       const shown = result.items.length
+      const offset = intake.offset
       const nextOffset = offset + shown < result.total ? offset + shown : null
       const s = result.registryState
       out(`\n来源：${registrySourceLabel(s.source)}${s.stale ? '（缓存）' : ''} · 更新：${s.fetchedAt ?? '—'} · 共 ${result.total} 条`)

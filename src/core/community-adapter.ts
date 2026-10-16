@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto'
 import type { RegistryEntry } from './registry.js'
 import type { CommunityCatalog, CommunityRawEntry } from './community.js'
+import { COMMUNITY_SLUG_RE } from './market-query.js'
 
 /** 与主清单 v1 同款约束（registry.ts MAX_ID / ID_RE / NPM_RE / GITHUB_RE 同语义，锚定不漂移）。 */
 const MAX_ID = 64
@@ -17,8 +18,6 @@ const ID_ILLEGAL_RE = /[^a-z0-9._-]+/g
 const ID_LEADING_ILLEGAL_RE = /^[._-]+/
 const NPM_SHAPE_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/
 const GITHUB_SHAPE_RE = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/
-/** 社区开放分类的安全 slug（计划 Task 4 契约；原生值保留不转译，Q40）。 */
-const COMMUNITY_CATEGORY_RE = /^[a-z0-9-]{1,32}$/
 const HASH_SUFFIX_LEN = 8
 const TRUNCATED_BODY_LEN = MAX_ID - (HASH_SUFFIX_LEN + 1)
 
@@ -150,7 +149,8 @@ export function adaptCommunityCatalog(catalog: CommunityCatalog): AdaptCommunity
     }
     const name = (raw.name as string).trim()
     const owner = (raw.owner as string).trim()
-    if (typeof raw.category !== 'string' || !COMMUNITY_CATEGORY_RE.test(raw.category)) {
+    // 社区分类安全 slug：正则单源于 market-query（0.9.92），与三端查询文法同一文法规则
+    if (typeof raw.category !== 'string' || !COMMUNITY_SLUG_RE.test(raw.category)) {
       skippedDirty += 1
       continue
     }

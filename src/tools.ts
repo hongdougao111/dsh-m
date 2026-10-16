@@ -18,35 +18,21 @@ import {
 } from './core/market.js'
 import type { RegistryConfig, RegistryEntry, RegistryState } from './core/registry.js'
 import { COMMUNITY_CATEGORY_LABELS } from './core/community.js'
+import { parseMarketQueryInput, PRIMARY_CATEGORY_LABELS, SEARCH_CORE_DEADLINE_MS, INSTALLED_CORE_DEADLINE_MS } from './core/market-query.js'
 import { appExitFromContext, scheduleRestart } from './core/restart.js'
 import { togglePlugin as coreTogglePlugin, type ToggleResult } from './core/toggle.js'
 import { resolveActiveProfile, assertWriteAllowed, type ActiveProfile } from './core/active-profile.js'
 import { desktopInstallFromRegistry, desktopToggle, desktopUninstall, desktopUpgradeFromRegistry } from './core/profile-ops.js'
 
-export const CATEGORY_LABELS: Record<RegistryEntry['category'], string> = {
-  essentials: '装机必备',
-  'cui-picks': '崔添翼精选',
-  'self-dev': 'iasi自研',
-  'tencent-lighthouse': '腾讯轻量云专区',
-  watchlist: '观察区',
-}
-
-/** 分类中文标签（0.7.0 Task 5）：精选 5 类 + 社区已知标签（单一事实源 COMMUNITY_CATEGORY_LABELS）；未知 slug 原样。 */
+/** 分类中文标签（0.7.0 Task 5）：精选 5 类（单一事实源 market-query PRIMARY_CATEGORY_LABELS）+ 社区已知标签（单一事实源 COMMUNITY_CATEGORY_LABELS）；未知 slug 原样。 */
 function categoryLabelOf(category: string): string {
-  return (
-    (CATEGORY_LABELS as Record<string, string>)[category] ??
-    COMMUNITY_CATEGORY_LABELS[category] ??
-    category
-  )
+  return PRIMARY_CATEGORY_LABELS[category] ?? COMMUNITY_CATEGORY_LABELS[category] ?? category
 }
 
-/** 工具 deadline 对齐（M1 Task 7）：search 45s（core 44s）、list/outdated 65s（core 60s + 5s 回包余量）。 */
+/** 工具 deadline 对齐（M1 Task 7）：search 45s（core 44s）、list/outdated 65s（core 60s + 5s 回包余量）。
+ *  core 侧两个 deadline 常量单源于 market-query（0.9.92，与 CLI 共用）；TOOL_TIMEOUT 为本端信封专属。 */
 const SEARCH_TOOL_TIMEOUT_MS = 45_000
-const SEARCH_CORE_DEADLINE_MS = 44_000
 const INSTALLED_TOOL_TIMEOUT_MS = 65_000
-const INSTALLED_CORE_DEADLINE_MS = 60_000
-/** 社区开放分类安全 slug（与 host-api 侧同语义） */
-const COMMUNITY_SLUG_RE = /^[a-z0-9-]{1,32}$/
 
 /** 社区 summary 四键投影（Task 7 ②）：agent 工具输出只带这四个字段。 */
 export function communityToolSummary(c: CommunityRegistrySummary | null | undefined): {
@@ -142,7 +128,7 @@ export function registerTools(
       query: { type: 'string', description: 'Main keyword, e.g. 主题 or 搜索. Optional; omit to browse.' },
       category: {
         type: 'string',
-        description: `Optional category: curated ${Object.keys(CATEGORY_LABELS).join('/')} or any community slug ([a-z0-9-]{1,32}, e.g. theme/memory/git).`,
+        description: `Optional category: curated ${Object.keys(PRIMARY_CATEGORY_LABELS).join('/')} or any community slug ([a-z0-9-]{1,32}, e.g. theme/memory/git).`,
       },
       source: {
         type: 'string',
@@ -169,22 +155,14 @@ export function registerTools(
     }),
     timeoutMs: SEARCH_TOOL_TIMEOUT_MS,
     async execute(args, exec) {
-      const categoryRaw = typeof args.category === 'string' ? args.category.trim() : ''
-      let category: string | null = null
-      if (categoryRaw !== '') {
-        if (categoryRaw in CATEGORY_LABELS || COMMUNITY_SLUG_RE.test(categoryRaw)) category = categoryRaw
-        else throw new Error(`非法分类: ${categoryRaw}（需精选分类或 [a-z0-9-]{1,32} slug）`)
-      }
-      // 分区参数（0.7.0 Task 5）：与 GUI 分区对齐；primary_only 已删除（D6a 允许破坏性变更）
-      const sourceRaw = typeof args.source === 'string' ? args.source.trim() : ''
-      if (sourceRaw !== '' && sourceRaw !== 'primary' && sourceRaw !== 'community' && sourceRaw !== 'all') {
-        throw new Error(`非法 source: ${sourceRaw}（需 primary/community/all）`)
-      }
-      const source: 'primary' | 'community' | 'all' = sourceRaw === '' ? 'all' : (sourceRaw as 'primary' | 'community' | 'all')
-      const rawLimit = Number(args.limit)
-      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? clamp(rawLimit, 1, 80) : 10
-      const rawOffset = Number(args.offset)
-      const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0
+      // 0.9.92 三端查询文法：category/source/limit/offset 经 market-query 单一入口归一
+      //（与 host-api/CLI 同源同语义；文法违规 throw 直飞，与此前 throw new Error 同通道）。
+      // 分区参数语义 0.7.0 Task 5 不变；primary_only 已删除（D6a 允许破坏性变更）。
+      const intake = parseMarketQueryInput(
+        { category: args.category, source: args.source, limit: args.limit, offset: args.offset },
+        { limitMax: 80, limitDefault: 10 },
+      )
+      const { category, source, offset, limit } = intake
       // metadata-only：agent 卡片不需要 latest；与 Host GUI 共用 host namespace；
       // deadline 44s 是本 waiter 的绝对上限（工具 timeout 45s 先到兜底）
       const result = await m.listMarket(cfg, {
@@ -531,7 +509,7 @@ export function registerTools(
       order: 211,
       text: [
         'Finding / recommending / browsing DSH plugins (插件) in the personal marketplace: you MUST call dshm_search, never web_search or bash. One call per user message; extract a real keyword. After cards appear, reply with AT MOST one short sentence. Do not print install commands.',
-        `Plugin categories: ${Object.entries(CATEGORY_LABELS).map(([k, v]) => `${k}=${v}`).join(', ')}.`,
+        `Plugin categories: ${Object.entries(PRIMARY_CATEGORY_LABELS).map(([k, v]) => `${k}=${v}`).join(', ')}.`,
         'Install only after the user names a card: dshm_install with its id. Then one short sentence mentioning the restart requirement; offer dshm_restart.',
         'For installed plugins, call dshm_list / dshm_outdated. Upgrade only after the user confirms which one: dshm_upgrade. Uninstall only after confirmation: dshm_uninstall.',
         'dshm_toggle switches a plugin on/off: confirm first unless the user already said it in the same message (把 skins 关掉 → execute directly); report live vs restart-required accordingly. ',
@@ -722,8 +700,4 @@ export function renderUpgrade(out: InstallOut & { fromVersion?: string }): strin
       ? '生效判定未完成（网络或解析失败）：为确保生效建议重启——询问是否 dshm_restart。'
       : '需要重启生效——询问是否 dshm_restart。'
   return `✅ ${out.pkg} 已升级（${from}${to}）。${extra}${tail}`
-}
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, n))
 }

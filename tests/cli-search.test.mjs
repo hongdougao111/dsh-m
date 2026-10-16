@@ -38,16 +38,17 @@ async function runSearch(listMarketImpl) {
   return { code, text }
 }
 
-/** 位置参数修复（2026-10-16）：可传任意 argv 并捕获 listMarket 收到的 opts。 */
+/** 位置参数修复（2026-10-16）：可传任意 argv 并捕获 listMarket 收到的 opts；err 行收集（0.9.92 文法钉例用）。 */
 async function runSearchCapture(argv, listMarketImpl) {
   const { runCli } = await import('../lib/cli.js')
   const lines = []
+  const errLines = []
   let capturedOpts
   const code = await runCli(argv, { listMarket: async (_cfg, opts) => { capturedOpts = opts; return listMarketImpl() } }, {
     out: (l) => lines.push(l),
-    err: () => {},
+    err: (l) => errLines.push(l),
   })
-  return { code, text: lines.join('\n'), captured: capturedOpts }
+  return { code, text: lines.join('\n'), errText: errLines.join('\n'), captured: capturedOpts }
 }
 
 describe('dshm search 标注（自研元数据 v1.1）', () => {
@@ -80,5 +81,19 @@ describe('dshm search 位置参数（2026-10-16 修复：位置关键词等价 -
   it('③ --query 缺值（true 形态）宽容回退位置参数（有意微改：旧行为走无评分浏览）', async () => {
     const { captured } = await runSearchCapture(['search', '主题', '--query'], () => resultOf([item()]))
     assert.equal(captured?.query, '主题', 'flags.query===true 非字符串 → 回退 positionals[0]')
+  })
+})
+
+describe('dshm search 三端查询文法（0.9.92：market-query 单一入口，非法 category 不再吞错）', () => {
+  it('① 非法 category → stderr 报错 + exit 1（今日静默空结果——吞错修复回归钉例）', async () => {
+    const { code, errText } = await runSearchCapture(['search', '--category', '非法!!'], () => resultOf([item()]))
+    assert.equal(code, 1, '非法 category 必须非零退出（今日 exit 0 吞错）')
+    assert.ok(errText.includes('错误：非法分类: 非法!!'), `stderr 应含统一文法报错，实际: ${errText}`)
+  })
+
+  it('② 非法 source → stderr 报错 + exit 1（现状补钉，防 rewiring 回退）', async () => {
+    const { code, errText } = await runSearchCapture(['search', '--source', 'zone'], () => resultOf([item()]))
+    assert.equal(code, 1)
+    assert.ok(errText.includes('错误：非法 source: zone'), `stderr 应含统一文法报错，实际: ${errText}`)
   })
 })
