@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.92 修复+重构：三端市场查询文法统一（market-query 单一入口）——CLI 非法 category 吞错修复
+
+- **需求（2026-10-16 实测）**：`dshm search --category <非法>` 静默返回「没有匹配的收录条目」+ exit 0，而同输入 GUI 得 400、agent 工具显式报错——「合并市场」词条承诺的「三端同源同语义」被 CLI 打破；根因是分类 slug 正则、source/offset/limit 解析、精选标签表在三端各持一份拷贝（正则 ×3、解析 ×3、标签表 ×2、deadline 常量 ×2），CLI 的拷贝漏了 category 校验。
+- **方案**：新模块 `src/core/market-query.ts`（GLOSSARY「市场查询文法」）作为三端共享文法单一事实源——单一入口 `parseMarketQueryInput(raw, policy)` 吃下 category（精选五桶 ∪ 社区 slug，trim 后校验与透传）/source（三值枚举）/limit（floor 先行 + 各端 policy：GUI 96/32、tools/CLI 80/10）/offset，文法违规 throw `MarketQueryError`（消息逐字节沿用既有文案），各端一行信封映射（host-api 400 / tools throw 直飞 / CLI 经 dispatch 统一 catch `错误：` + exit 1）；顺手单源化 slug 正则（含目录适配层第 3 份）、精选标签表（以 registry `CATEGORIES` 为键集基准 + 漂移守卫测试）、deadline 常量；CLI help 的 category 列表同步为现行策展五桶（旧值为 0.9.16 前残留）。自觉差异注记：① tools limit 的 (1,80) 区间小数今日由 core `clampLimit` 隐式 floor，改后在入口显式 floor（floor 位置前移，值域逐点相同，输出对象不含 limit 字段）；② CLI category/source 改为 trim 后校验（对齐 host-api/tools，`' self-dev '` 今日匹配不到任何条目、`--source ' all '` 今日报非法，改后均按 trim 值正常判定）；③ 双违例请求报错归属顺序统一 category → source（单违例逐字节不变）。
+- **验证**：全量 1526 测试全绿（新增 market-query 文法矩阵 18 例 + 标签键集 ≡ CATEGORIES 漂移守卫 + CLI 非法 category/非法 source 回归钉例；既有「非法分类/非法 source」锚零迁移）、typecheck 零错误；真机 `node lib/cli.js search --category '非法分类!!'` → stderr `错误：非法分类: 非法分类!!（需精选分类或 [a-z0-9-]{1,32} slug）` + exit 1（校验先于任何网络调用）；实施计划与 grill 十决议、独立评审三轮 15 项收敛记录在 `docs/plans/2026-10-16-market-query-intake-implementation-plan.md`。
+
 ### 0.9.91 优化：设置页三卡行 4:7:3 → 4:7:4——「社区清单」与「关于」等宽
 
 - **需求（2026-10-16，主人真机反馈）**：宽屏/全屏下设置页三卡行左右不对称——「社区清单」（4fr）与「关于」（3fr）宽度不一致，视觉失衡。
@@ -642,6 +648,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fix + refactor in 0.9.92 — unified three-end market query intake (market-query single entry); CLI invalid-category silent swallow fixed
+
+- **Need (2026-10-16, reproduced live)**: `dshm search --category <invalid>` silently printed "no matching entries" and exited 0, while the same input gets a 400 from the panel API and an explicit error from the agent tool — breaking the "same source, same semantics across GUI / tools / CLI" promise. Root cause: the category slug regex, source/offset/limit parsing, and the curated label map each had per-end copies (regex ×3, parsing ×3, labels ×2, deadline constants ×2), and the CLI copy lacked category validation.
+- **Approach**: new module `src/core/market-query.ts` (GLOSSARY "Market Query Intake") is the single source of the shared grammar — one entry point `parseMarketQueryInput(raw, policy)` covers category (curated five ∪ community slug, validate-and-pass trimmed), source (three-value enum), limit (floor-first + per-end policy: GUI 96/32, tools/CLI 80/10), and offset; grammar violations throw `MarketQueryError` with byte-identical legacy messages, and each end maps to its own envelope (HTTP 400 / thrown tool error / CLI dispatch catch `错误：` + exit 1). Also single-sourced: the slug regex (including the catalog adapter's third copy), the curated label map (keyed off registry `CATEGORIES` with a drift-guard test), and the deadline constants; the CLI help category list now shows the current curated five (the old list was a pre-0.9.16 leftover). Deliberate deltas: (1) tools' in-range fractional limits were implicitly floored by core `clampLimit`; the floor now happens explicitly at intake (same values pointwise; output objects carry no limit field); (2) CLI category/source are now validated after trimming, matching host-api/tools (`' self-dev '` used to match nothing and `--source ' all '` used to error); (3) dual-violation requests now report category before source (single-violation messages byte-identical).
+- **Verification**: full suite 1526 green (18 new grammar-matrix cases + label-keys ≡ CATEGORIES drift guard + CLI invalid-category/invalid-source regression pins; existing "非法分类/非法 source" anchors migrated zero), typecheck clean; live `node lib/cli.js search --category '非法分类!!'` → stderr `错误：非法分类: 非法分类!!（需精选分类或 [a-z0-9]{1,32} slug）` + exit 1 (validation precedes any network call); plan, grill decisions, and the three-round 15-item independent review live in `docs/plans/2026-10-16-market-query-intake-implementation-plan.md`.
 
 ### Polish in 0.9.91 — settings three-card row 4:7:3 → 4:7:4: Community and About equal width
 

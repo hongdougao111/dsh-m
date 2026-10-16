@@ -89,6 +89,10 @@ _Avoid_: 混合清单、全量列表、合并视图（展示层已分区）
 合并市场的进程内物化形态及其拥有模块：按身份键（namespace、profile、registry 身份、目录 version+pin）一次性完成解析→目录适配→合并→匹配索引，同代内条目对象引用稳定（跨请求复用，搜索归一化缓存因此生效）；身份变即整体重建、旧代自然淘汰，失败/超时形态不落代。物化的是本地文件的派生数据，不是 latest 探测值（与 ADR-0006 划界）。
 _Avoid_: 市场缓存（撞「缓存是优化」的泛称，且易与 latest 缓存混淆）、快照（与客户端 localStorage 快照、社区「缓存快照」标注撞词）、市场代（口语可，正式文档用全称）
 
+**市场查询文法（Market Query Intake）**:
+三端（面板 API / agent 工具 / CLI）市场查询参数的共享校验与归一模块：精选五桶（≡ registry `CATEGORIES`）∪ 社区 slug、source 枚举、offset/limit（各端 policy）；非法输入统一抛 `MarketQueryError`，由各端映射自身信封（400 / throw / stderr+exit 1）。「合并市场」条目「三端同源同语义」承诺的执行机制。
+_Avoid_: 参数校验（过泛）、query parser（实现口吻）
+
 **目录适配层（Catalog Adapter）**:
 把社区清单原生条目转换为收录条目的翻译模块；分类保留原生值不转译，id 需合成保证唯一。
 _Avoid_: schema 转换器、normalize 层
