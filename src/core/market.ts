@@ -1167,7 +1167,35 @@ export class InstallGuardError extends Error {
     this.compensation = fields.compensation
     this.repairBasis = fields.repairBasis
   }
+
+  /**
+   * 线格式单一事实源（0.9.93）：三端共享的 6 字段守卫投影。各端信封自拼（host-api 409 payload 的
+   * ok/error、tools 的 ok/guard/message、cli 的裸 JSON），共享部分一律经此方法——加守卫字段只改
+   * 本方法 + client 读取一处。repairBasis undefined 时键不存在（今日 5 处投影同语义）。
+   */
+  toWire(): InstallGuardWire {
+    return {
+      kind: this.kind,
+      violations: this.violations,
+      compensation: this.compensation,
+      needsRestart: this.needsRestart,
+      restartSafe: this.restartSafe,
+      ...(this.repairBasis ? { repairBasis: this.repairBasis } : {}),
+    }
+  }
 }
+
+/** InstallGuardError 的三端共享线格式（toWire 的返回形状；键序与键缺席语义被 install-guard.test.mjs 钉住）。 */
+export interface InstallGuardWire {
+  kind: 'compensated' | 'manual_required'
+  violations: GuardViolation[]
+  compensation: { status: string; note: string }
+  needsRestart: boolean
+  restartSafe: boolean
+  repairBasis?: string
+}
+
+export type { GuardViolation } from './install-guard.js'
 
 export interface PreMutationSnapshot {
   deps: Record<string, string>

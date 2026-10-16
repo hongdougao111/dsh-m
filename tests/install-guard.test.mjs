@@ -231,3 +231,56 @@ describe('readDeps 快照与注入', () => {
     assert.deepEqual(Object.keys(r).sort(), ['ok', 'unavailable', 'violations'])
   })
 })
+
+describe('InstallGuardError.toWire 线格式（0.9.93 收敛：五处投影单一事实源）', () => {
+  it('无 repairBasis → 六字段齐 + 键缺席（repairBasis in wire === false）', async () => {
+    const { InstallGuardError } = await import('../lib/core/market.js')
+    const e = new InstallGuardError({
+      kind: 'manual_required',
+      message: 'm',
+      violations: [],
+      needsRestart: true,
+      restartSafe: false,
+      compensation: { status: 'manual-repair', note: 'n' },
+    })
+    const wire = e.toWire()
+    assert.deepEqual(wire, {
+      kind: 'manual_required',
+      violations: [],
+      compensation: { status: 'manual-repair', note: 'n' },
+      needsRestart: true,
+      restartSafe: false,
+    })
+    assert.equal('repairBasis' in wire, false, 'repairBasis undefined 时键必须不存在（今日 5 处投影同语义）')
+  })
+
+  it('带 repairBasis → 键在场', async () => {
+    const { InstallGuardError } = await import('../lib/core/market.js')
+    const e = new InstallGuardError({
+      kind: 'manual_required',
+      message: 'm',
+      violations: [],
+      needsRestart: true,
+      restartSafe: false,
+      compensation: { status: 'manual-repair', note: 'n' },
+      repairBasis: '旧 spec',
+    })
+    assert.equal(e.toWire().repairBasis, '旧 spec')
+  })
+
+  it('键序钉例：kind,violations,compensation,needsRestart,restartSafe（+repairBasis 尾随）', async () => {
+    const { InstallGuardError } = await import('../lib/core/market.js')
+    const e = new InstallGuardError({
+      kind: 'compensated',
+      message: 'm',
+      violations: [],
+      needsRestart: true,
+      restartSafe: true,
+      compensation: { status: 'rolled-back', note: 'n' },
+      repairBasis: '旧 spec',
+    })
+    assert.deepEqual(Object.keys(e.toWire()), [
+      'kind', 'violations', 'compensation', 'needsRestart', 'restartSafe', 'repairBasis',
+    ])
+  })
+})
