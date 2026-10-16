@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.91 优化：设置页三卡行 4:7:3 → 4:7:4——「社区清单」与「关于」等宽
+
+- **需求（2026-10-16，主人真机反馈）**：宽屏/全屏下设置页三卡行左右不对称——「社区清单」（4fr）与「关于」（3fr）宽度不一致，视觉失衡。
+- **方案**：三列制 `grid-template-columns` 4fr 7fr 3fr → **4fr 7fr 4fr**，左右窄卡等宽、中间「精选清单」仍为视觉主体；两列常态（容器 <1100px）与 ≤760px 视口单列不变。
+- **验证**：typecheck 零错误、全量 1506 测试全绿（源锚断言同步更新至 4:7:4）；主人真机验收通过（热部署预览定稿后随本版发版）。
+
 ### 0.9.90 性能：搜索归一化冷路径单遍化——世代冷搜索 ~330ms → 99ms p50（宿主事件循环最后一块 >100ms 停摆清除）+ CLI search 位置参数修复
 
 - **问题（2026-10-16 走查 + 评审实测）**：物化合并市场（ADR-0016）每个世代的**首次搜索**仍同步阻塞宿主事件循环 ~324–364ms——`normalizeSearchText` 逐字符双 regex 分类 + 收尾全量 regex replace 两遍扫描（全语料 256.8ms，NFKC 仅 13.6ms）+ `fieldText` 每字段三次数组分配；触发频率 = 每小时 registry SWR 换代（fetchedAt 无条件 bump）+ 每次宿主重启 + 每日目录换版后的第一次搜索，agent `dshm_search` 同路径。另：`dshm search 主题` 的位置参数被 parseArgs 静默丢弃（query=undefined → 无评分浏览整页）。
@@ -636,6 +642,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Polish in 0.9.91 — settings three-card row 4:7:3 → 4:7:4: Community and About equal width
+
+- **Need (2026-10-16, live feedback)**: on wide/fullscreen the settings three-card row was asymmetric — Community (4fr) and About (3fr) had different widths.
+- **Approach**: three-column `grid-template-columns` 4fr 7fr 3fr → **4fr 7fr 4fr**; the two side cards are now equal width while Registry stays the visual anchor. The two-column default (container <1100px) and the ≤760px single column are unchanged.
+- **Verification**: typecheck clean, full suite 1506 green (source-anchor assertions updated to 4:7:4); accepted live (hot-deploy preview approved, shipped in this release).
 
 ### Performance in 0.9.90 — single-pass search normalization cold path: per-generation cold search ~330ms → 99ms p50 (last >100ms stall on the host event loop cleared) + CLI search positional fix
 
