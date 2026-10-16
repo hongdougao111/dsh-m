@@ -301,7 +301,7 @@ export function registerTools(
       } catch (err) {
         if (err instanceof InstallGuardError) {
           // 结构化 error result（M2 Task 3 ㉑-㉜）：不渲染「已安装」，无 force 通道；restartSafe 随结果携带
-          return { ok: false, guard: true, kind: err.kind, message: err.message, violations: err.violations, compensation: err.compensation, needsRestart: err.needsRestart, restartSafe: err.restartSafe, ...(err.repairBasis ? { repairBasis: err.repairBasis } : {}) }
+          return { ok: false, guard: true, message: err.message, ...err.toWire() }
         }
         throw err
       }
@@ -465,7 +465,7 @@ export function registerTools(
         return cloneJson(await m.upgradePlugin(target, cfg, { forceIncompatible: force, namespace: 'host', channel: 'host-tool' }))
       } catch (err) {
         if (err instanceof InstallGuardError) {
-          return { ok: false, guard: true, kind: err.kind, message: err.message, violations: err.violations, compensation: err.compensation, needsRestart: err.needsRestart, restartSafe: err.restartSafe, ...(err.repairBasis ? { repairBasis: err.repairBasis } : {}) }
+          return { ok: false, guard: true, message: err.message, ...err.toWire() }
         }
         throw err
       }

@@ -380,7 +380,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
         })
       } catch (e) {
         if (e instanceof InstallGuardError) {
-          err('[⛔ 装后守卫拦截] ' + JSON.stringify({ kind: e.kind, violations: e.violations, compensation: e.compensation, needsRestart: e.needsRestart, restartSafe: e.restartSafe, ...(e.repairBasis ? { repairBasis: e.repairBasis } : {}) }))
+          err('[⛔ 装后守卫拦截] ' + JSON.stringify(e.toWire()))
           err(e.message)
           err(e.restartSafe ? '可以重启 DSH Web：dshm restart --yes' : '修复后再重启（不要现在重启）。')
           return 1
@@ -405,7 +405,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
         })
       } catch (e) {
         if (e instanceof InstallGuardError) {
-          err('[⛔ 装后守卫拦截] ' + JSON.stringify({ kind: e.kind, violations: e.violations, compensation: e.compensation, needsRestart: e.needsRestart, restartSafe: e.restartSafe, ...(e.repairBasis ? { repairBasis: e.repairBasis } : {}) }))
+          err('[⛔ 装后守卫拦截] ' + JSON.stringify(e.toWire()))
           err(e.message)
           err(e.restartSafe ? '可以重启 DSH Web：dshm restart --yes' : '修复后再重启（不要现在重启）。')
           return 1

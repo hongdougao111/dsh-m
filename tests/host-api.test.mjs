@@ -823,6 +823,33 @@ describe('host-api：0.4.0 set-enabled / forceIncompatible（Task 14）', () => 
     assert.equal(res.status, 409)
     assert.deepEqual(res.body.issue, issue)
   })
+
+  it('install：InstallGuardError → 409 + toWire 六字段投影 + repairBasis 键缺席（0.9.93 收敛钉例）', async () => {
+    const { InstallGuardError } = await import('../lib/core/market.js')
+    const { dispatcher } = setupToggle({
+      toggleImpl: async () => TOGGLE_LIVE,
+      installImpl: async () => {
+        throw new InstallGuardError({
+          kind: 'manual_required',
+          message: '守卫拦截（测试注入）',
+          violations: [],
+          needsRestart: true,
+          restartSafe: false,
+          compensation: { status: 'manual-repair', note: 'n' },
+        })
+      },
+    })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'install', id: 'p' } })
+    assert.equal(res.status, 409)
+    assert.equal(res.body.ok, false)
+    assert.equal(res.body.error, '守卫拦截（测试注入）')
+    assert.equal(res.body.kind, 'manual_required')
+    assert.deepEqual(res.body.violations, [])
+    assert.deepEqual(res.body.compensation, { status: 'manual-repair', note: 'n' })
+    assert.equal(res.body.needsRestart, true)
+    assert.equal(res.body.restartSafe, false, 'GUI 一键重启只读 restartSafe（M2 Task 3 决策）')
+    assert.equal('repairBasis' in res.body, false, 'repairBasis undefined 时键不存在（键缺席语义）')
+  })
 })
 
 // ---------- M1 Task 6：market 请求解析 / registry 社区 summary / registry-config 两键 ----------

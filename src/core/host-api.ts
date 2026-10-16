@@ -236,18 +236,14 @@ function errorStatus(err: unknown): { status: number; payload: Record<string, un
     return { status, payload: { ok: false, error: err.message, code: err.code } }
   }
   if (err instanceof InstallGuardError) {
-    // 装后守卫拦截（M2 Task 3）：结构化投影含 needsRestart/restartSafe/kind——GUI 一键重启只读 restartSafe
+    // 装后守卫拦截（M2 Task 3）：结构化投影含 needsRestart/restartSafe/kind——GUI 一键重启只读 restartSafe；
+    // 0.9.93 起线格式单源于 toWire（信封 ok/error 本端自拼）
     return {
       status: 409,
       payload: {
         ok: false,
         error: err.message,
-        kind: err.kind,
-        violations: err.violations,
-        compensation: err.compensation,
-        needsRestart: err.needsRestart,
-        restartSafe: err.restartSafe,
-        ...(err.repairBasis ? { repairBasis: err.repairBasis } : {}),
+        ...err.toWire(),
       },
     }
   }
