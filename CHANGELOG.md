@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.93 重构：装后守卫线格式收敛至 InstallGuardError.toWire——加守卫字段编辑点 8 → 2（纯重构，线格式语义零变化）
+
+- **需求（2026-10-16 架构巡查摩擦点 3，巡查首推）**：`InstallGuardError` → 线格式的投影在手写 5 处逐字重复（host-api 409 payload / tools install+upgrade 两臂 / cli install+upgrade 两臂）+ client 再拼一次——加一个守卫字段要碰 8 处（类 + 5 投影 + client 读取 + 测试），`repairBasis` 后加时各点手补已实证过一次复发。
+- **方案**：产地方法 `toWire(): InstallGuardWire`（随类导出接口 + `GuardViolation` re-export）成为 6 字段共享线格式单一事实源；五处投影改一行展开（信封差异留在各端：host-api `ok/error`、tools `ok/guard/message`、cli 裸 JSON），`repairBasis` undefined 时键不存在的语义移入方法本体。加字段编辑点降为 2（类+toWire 一处、client 读取一处——浏览器边界不能 import core，防御性拼装留守，如实注记）。自觉差异注记：tools 信封键序 kind/message 交换（JSON 键序对消费方无语义，全 tests/ 无原始 JSON 键序钉）。
+- **验证**：全量 1530 测试全绿（新增 toWire 三钉例：六字段齐/repairBasis 键缺席/键序；新增 host-api dispatcher 409 钉例补 host-api 投影零测试覆盖的缺口；tools 两臂 execute 钉例零迁移）、typecheck 零错误；收敛锚 `repairBasis ? { repairBasis: … }` 三文件 5 → 0（兼证无第 6 处投影）；实施计划经两轮独立评审四项收敛 + 执行评审两轮（含 A1 钉例独立成 describe）记录在 `docs/plans/2026-10-17-install-guard-towire-implementation-plan.md`。
+
 ### 0.9.92 修复+重构：三端市场查询文法统一（market-query 单一入口）——CLI 非法 category 吞错修复
 
 - **需求（2026-10-16 实测）**：`dshm search --category <非法>` 静默返回「没有匹配的收录条目」+ exit 0，而同输入 GUI 得 400、agent 工具显式报错——「合并市场」词条承诺的「三端同源同语义」被 CLI 打破；根因是分类 slug 正则、source/offset/limit 解析、精选标签表在三端各持一份拷贝（正则 ×3、解析 ×3、标签表 ×2、deadline 常量 ×2），CLI 的拷贝漏了 category 校验。
@@ -648,6 +654,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Refactor in 0.9.93 — post-install guard wire format converged onto InstallGuardError.toWire; adding a guard field now touches 8 → 2 points (pure refactor, zero wire-format semantic change)
+
+- **Need (2026-10-16 architecture walk, friction point 3, the walk's top pick)**: the `InstallGuardError` → wire-format projection was hand-written verbatim in 5 places (host-api 409 payload / tools install+upgrade arms / cli install+upgrade arms) plus one more assembly in the client — adding a guard field meant touching 8 points (class + 5 projections + client read + tests); the later addition of `repairBasis` had already demonstrated the recurrence once.
+- **Approach**: a source method `toWire(): InstallGuardWire` (interface exported alongside the class, plus a `GuardViolation` re-export) becomes the single source of the shared 6-field wire format; the five projections become one-line spreads (envelope differences stay per-end: host-api `ok/error`, tools `ok/guard/message`, cli bare JSON), and the "repairBasis key absent when undefined" semantics move into the method body. Adding a field now touches 2 points (class+toWire, and the client read — the browser bundle cannot import core modules, so its defensive assembly stays, honestly noted). Deliberate delta: the tools envelope swaps key order between kind/message (JSON key order carries no consumer semantics; no raw-JSON key-order pins exist across tests/).
+- **Verification**: full suite 1530 green (three new toWire pins: six fields / repairBasis key absence / key order; a new host-api dispatcher 409 pin closing the "host-api projection had zero test coverage" gap; tools-arm execute pins migrated zero), typecheck clean; the convergence anchor `repairBasis ? { repairBasis: … }` went 5 → 0 across the three files (also proving there is no 6th projection); plan review (two rounds, four findings) and execution review (two rounds, including A1 extracting the pin into its own describe) recorded in `docs/plans/2026-10-17-install-guard-towire-implementation-plan.md`.
 
 ### Fix + refactor in 0.9.92 — unified three-end market query intake (market-query single entry); CLI invalid-category silent swallow fixed
 
