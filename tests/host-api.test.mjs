@@ -823,12 +823,15 @@ describe('host-api：0.4.0 set-enabled / forceIncompatible（Task 14）', () => 
     assert.equal(res.status, 409)
     assert.deepEqual(res.body.issue, issue)
   })
+})
 
-  it('install：InstallGuardError → 409 + toWire 六字段投影 + repairBasis 键缺席（0.9.93 收敛钉例）', async () => {
+// ---------- 装后守卫 InstallGuardError 投影（0.9.93 toWire 收敛；原寄居 set-enabled describe，评审 A1 独立） ----------
+
+describe('host-api：install 装后守卫拦截 → 409 + toWire 投影', () => {
+  it('InstallGuardError → 409 + toWire 六字段投影 + repairBasis 键缺席（0.9.93 收敛钉例）', async () => {
     const { InstallGuardError } = await import('../lib/core/market.js')
-    const { dispatcher } = setupToggle({
-      toggleImpl: async () => TOGGLE_LIVE,
-      installImpl: async () => {
+    const { dispatcher } = setup({
+      installFromRegistry: async () => {
         throw new InstallGuardError({
           kind: 'manual_required',
           message: '守卫拦截（测试注入）',
