@@ -43,6 +43,8 @@ function categoryLabelOf(category: string): string {
 interface Parsed {
   cmd: string
   flags: Record<string, string | boolean>
+  /** 非 `--` 且未被 flag 取值消费的词元（2026-10-16：search 取 [0] 作关键词兜底，多余忽略） */
+  positionals: string[]
 }
 
 /** 可注入 core 依赖（测试用；生产走真实实现）。 */
@@ -64,9 +66,13 @@ export interface CliIo {
 function parseArgs(argv: string[]): Parsed {
   const cmd = argv[0] || 'help'
   const flags: Record<string, string | boolean> = {}
+  const positionals: string[] = []
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]
-    if (!a.startsWith('--')) continue
+    if (!a.startsWith('--')) {
+      positionals.push(a)
+      continue
+    }
     const key = a.slice(2)
     const next = argv[i + 1]
     if (next !== undefined && !next.startsWith('--')) {
@@ -76,7 +82,7 @@ function parseArgs(argv: string[]): Parsed {
       flags[key] = true
     }
   }
-  return { cmd, flags }
+  return { cmd, flags, positionals }
 }
 
 function cliConfig(): RegistryConfig {
@@ -173,8 +179,8 @@ const HELP = `dshm — DSH Marketplace（DSH 插件市场：精选策展 + 社�
 用法：dshm <命令> [参数]
 
 只读命令：
-  dshm search [--query 关键词] [--category market|tools|ui|search|other|<社区slug>] [--source primary|community|all] [--limit N] [--offset N]
-                                        （source 分区：community=社区目录 4000+ 条 / primary=精选策展 / all=默认；limit 默认 10；offset 翻页）
+  dshm search [关键词] [--query 关键词] [--category market|tools|ui|search|other|<社区slug>] [--source primary|community|all] [--limit N] [--offset N]
+                                        （首个位置参数等价 --query，--query 缺值时也回退它，多余位置参数忽略；source 分区：community=社区目录 4000+ 条 / primary=精选策展 / all=默认；limit 默认 10；offset 翻页）
   dshm list                          列出 web profile 已装插件（含市场标注/可升级）
   dshm outdated                      检查已装插件的最新版本
   dshm registry                      查看收录清单来源与条目
@@ -220,7 +226,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
     upgradePlugin: deps.upgradePlugin ?? upgradePlugin,
     togglePlugin: deps.togglePlugin ?? coreTogglePlugin,
   }
-  const { cmd, flags } = parseArgs(argv)
+  const { cmd, flags, positionals } = parseArgs(argv)
   const cfg = cliConfig()
 
   // 0.9.0 双 profile（ADR-0005）：CLI 是 Web-only 入口（独立进程拿不到宿主 profileContext，
@@ -257,7 +263,7 @@ async function runCliDispatch(argv: string[], deps: CliDeps, io: Required<CliIo>
       const offsetRaw = Number(flags.offset)
       const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0
       const result: MarketResult = await d.listMarket(cfg, {
-        query: typeof flags.query === 'string' ? flags.query : undefined,
+        query: typeof flags.query === 'string' ? flags.query : positionals[0],
         category: typeof flags.category === 'string' ? flags.category : null,
         source,
         offset,

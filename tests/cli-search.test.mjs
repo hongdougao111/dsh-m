@@ -34,13 +34,20 @@ function resultOf(items) {
 }
 
 async function runSearch(listMarketImpl) {
+  const { code, text, captured } = await runSearchCapture(['search', '--query', 'surf'], listMarketImpl)
+  return { code, text }
+}
+
+/** 位置参数修复（2026-10-16）：可传任意 argv 并捕获 listMarket 收到的 opts。 */
+async function runSearchCapture(argv, listMarketImpl) {
   const { runCli } = await import('../lib/cli.js')
   const lines = []
-  const code = await runCli(['search', '--query', 'surf'], { listMarket: async () => listMarketImpl() }, {
+  let capturedOpts
+  const code = await runCli(argv, { listMarket: async (_cfg, opts) => { capturedOpts = opts; return listMarketImpl() } }, {
     out: (l) => lines.push(l),
     err: () => {},
   })
-  return { code, text: lines.join('\n') }
+  return { code, text: lines.join('\n'), captured: capturedOpts }
 }
 
 describe('dshm search 标注（自研元数据 v1.1）', () => {
@@ -54,5 +61,24 @@ describe('dshm search 标注（自研元数据 v1.1）', () => {
     const { code, text } = await runSearch(() => resultOf([item()]))
     assert.equal(code, 0)
     assert.ok(!text.includes('[作者自用]'), 'audience 缺省不加作者自用标')
+  })
+})
+
+describe('dshm search 位置参数（2026-10-16 修复：位置关键词等价 --query，flag 优先）', () => {
+  it('① 位置参数作 query：dshm search 主题 ≡ --query 主题', async () => {
+    const { code, text, captured } = await runSearchCapture(['search', '主题'], () => resultOf([item()]))
+    assert.equal(code, 0)
+    assert.equal(captured?.query, '主题', '位置参数应透传为 query（现状 parseArgs 丢弃 → undefined）')
+    assert.ok(text.includes('• '), '输出含条目行（计划 Task 5 Step 1 明文断言，R4-P1 补齐）')
+  })
+
+  it('② flag 优先：--query x 压过位置参数', async () => {
+    const { captured } = await runSearchCapture(['search', '主题', '--query', 'x'], () => resultOf([item()]))
+    assert.equal(captured?.query, 'x', '字符串形态的 --query 恒优先')
+  })
+
+  it('③ --query 缺值（true 形态）宽容回退位置参数（有意微改：旧行为走无评分浏览）', async () => {
+    const { captured } = await runSearchCapture(['search', '主题', '--query'], () => resultOf([item()]))
+    assert.equal(captured?.query, '主题', 'flags.query===true 非字符串 → 回退 positionals[0]')
   })
 })
