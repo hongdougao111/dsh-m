@@ -6,6 +6,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   normalizeSearchText,
@@ -109,5 +110,52 @@ describe('relevanceScore — 多词约束与 memoize', () => {
     assert.ok(s1 > 0)
     e.name = 'renamed' // 同一对象引用 → 应命中缓存而非重算
     assert.equal(relevanceScore(e, terms('original')), s1)
+  })
+})
+
+describe('normalizeSearchText — golden 差分语料（2026-10-16 计划 Task 1）', () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL('./fixtures/search-normalize-corpus.json', import.meta.url), 'utf8'),
+  )
+  it(`golden 冻结语料字节等价（${fixture.cases.length} 条，catalog ${fixture.catalogVersion}，seed ${fixture.seed}）`, () => {
+    assert.ok(Array.isArray(fixture.cases) && fixture.cases.length >= 3800, 'fixture 条数下限 3800')
+    const bad = []
+    for (let i = 0; i < fixture.cases.length; i++) {
+      const { input, expected } = fixture.cases[i]
+      const actual = normalizeSearchText(input)
+      if (actual !== expected) {
+        bad.push({ i, input: JSON.stringify(input).slice(0, 120), expected: JSON.stringify(expected).slice(0, 120), actual: JSON.stringify(actual).slice(0, 120) })
+        if (bad.length >= 5) break
+      }
+    }
+    assert.deepStrictEqual(bad, [], 'golden 差分出现 mismatch：修实现，绝不改 fixture（等价红线）')
+  })
+})
+
+describe('normalizeSearchText — astral 与边界 quirk 钉（全部经现实现实测核验）', () => {
+  const B = String.fromCodePoint(0x20000) // 𠀀 CJK 扩展 B：NFKC 稳定 astral 词符
+  // 字节等价红线：以下断言钉住「现实现行为」而非理想行为——quirk 保真不修（评审 R1-P1/P2/P9）。
+  it('NFKC 稳定 astral 词对透明：保留原样、转角不触发、重置转角状态', () => {
+    assert.equal(normalizeSearchText(`a${B}管`), `a${B}管`)
+    assert.equal(normalizeSearchText(`a,${B}`), `a ${B}`)
+    assert.equal(normalizeSearchText(`管${B}a`), `管${B}a`)
+    assert.equal(normalizeSearchText(`${B}${B}管`), `${B}${B}管`)
+  })
+  it('NFKC×astral 交互：数学字母 𝕏 被先折成 ASCII（到不了 astral 分支）', () => {
+    assert.equal(normalizeSearchText('a𝕏管'), 'ax 管')
+  })
+  it('emoji 非词对折叠为单空格', () => {
+    assert.equal(normalizeSearchText('a😀b'), 'a b')
+  })
+  it('FA 段未赋值洞码点按非词折叠（CJK_RE 命中而 WORD_RE 不命中）', () => {
+    assert.equal(normalizeSearchText('a\uFA6Eb'), 'a b')
+    assert.equal(normalizeSearchText('\uFA6E一'), '一')
+  })
+  it('lone surrogate 孤立代理半区按非词折叠', () => {
+    assert.equal(normalizeSearchText('a\uD800b'), 'a b')
+    assert.equal(normalizeSearchText('\uDC00x'), 'x')
+  })
+  it('中西文边界归一回归锚', () => {
+    assert.equal(normalizeSearchText('MCP管理'), 'mcp 管理')
   })
 })
