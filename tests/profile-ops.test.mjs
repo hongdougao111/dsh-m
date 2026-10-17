@@ -611,6 +611,123 @@ describe('desktopInstallFromRegistry：install 路径静默两步化 + 全新安
   })
 })
 
+// ---------- 0.10.1（E2E 实证扩面）：enable 竞速自动重试普适到两步第二腿/回装腿/D3 + 回装失败账实复读 ----------
+
+describe('enable 竞速重试普适化 + 回装失败账实复读（0.10.1，真机 skip-auth 事件）', () => {
+  const GUARD_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'already-installed' } }
+  const ADD_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'operation-error' }, packageResult: { exitCode: 1 } }
+  const OK = { changed: true, application: 'applied', stage: 'install', bundle: 'pkg-a', packageResult: { exitCode: 0 } }
+  function twoStepDeps(service) {
+    return {
+      getService: () => service,
+      loadRegistry: async () => registryWith([ENTRY]),
+      listInstalled: async () => ({ items: [{ pkg: 'pkg-a', name: 'Plug A', version: '0.9.0', spec: '0.9.0' }], others: [], complete: true }),
+      npmLatest: async () => ({ version: '1.2.3', integrity: 'sha512-x' }),
+      precheck: async () => null,
+      classifyActivation: async () => 'unknown',
+    }
+  }
+  const ENABLE_RACE = { changed: false, application: 'failed', stage: 'enable', error: { code: 'operation-error' } }
+  function d3Deps(service) {
+    return {
+      getService: () => service,
+      npmLatest: async () => ({ version: '2.0.0', integrity: 'sha512-x', tarball: 'https://example.com/dsh-m-2.0.0.tgz' }),
+      npmTarballUrl: async () => 'https://example.com/dsh-m-2.0.0.tgz',
+    }
+  }
+
+  it('T-A1：第二腿 enable 竞速 → 自动重试即愈 → 两步升级成功（leg1 + leg2×2，同 spec）', async () => {
+    _setEnableRetryDelayForTests(0)
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ENABLE_RACE }
+      return { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@1.2.3'], '第二腿重试一次')
+    assert.deepEqual(calls.removeBundle, ['pkg-a'])
+    assert.match(res.output, /two-step/)
+  })
+
+  it('T-A2：回装腿 enable 竞速 → 自动重试即愈 → 降级恢复（不误报缺席）', async () => {
+    _setEnableRetryDelayForTests(0)
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      if (calls.installBundle.length === 3) return { ...ENABLE_RACE }
+      return { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0', 'pkg-a@0.9.0'], '回装腿重试一次')
+    assert.equal(res.degraded, true)
+    assert.equal(res.restoredTo, '0.9.0')
+    assert.equal(res.version, '0.9.0')
+  })
+
+  it('T-B1：回装腿失败但账面已有版本 → rollback-failed 如实报「已写入 + 重启激活」（零缺席误导）', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      return { changed: false, application: 'failed', stage: 'install', error: { code: 'operation-error' } }
+    } })
+    const deps = twoStepDeps(service)
+    deps.listInstalled = async () => ({ items: [{ pkg: 'pkg-a', name: 'Plug A', version: '0.9.0', spec: '0.9.0' }], others: [], complete: true })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, { profileDir: 'X:/profile-tb1' }, deps),
+      (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed'
+        && err.message.includes('已写入')
+        && err.message.includes('重启')
+        && !err.message.includes('可能缺席')
+        && err.details?.installedVersion === '0.9.0',
+    )
+  })
+
+  it('T-B2：回装腿失败且账面确实缺席 → 保留缺席文案与手动重装指引（原语义不回归）', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      return { changed: false, application: 'failed', stage: 'install', error: { code: 'operation-error' } }
+    } })
+    const deps = twoStepDeps(service)
+    let liCalls = 0
+    deps.listInstalled = async () => {
+      liCalls += 1
+      // 首查（升级目标定位）返回已装 0.9.0；回装失败复读时返回缺席
+      return liCalls === 1
+        ? { items: [{ pkg: 'pkg-a', name: 'Plug A', version: '0.9.0', spec: '0.9.0' }], others: [], complete: true }
+        : { items: [], others: [], complete: true }
+    }
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, { profileDir: 'X:/profile-tb2' }, deps),
+      (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed'
+        && err.message.includes('可能缺席')
+        && err.message.includes('手动重装 pkg-a@0.9.0')
+        && err.details?.installedVersion === undefined,
+    )
+  })
+
+  it('T-A3：D3 自升级通道 installBundle enable 竞速 → 自动重试即愈（同 URL 两次，成功收口 intent）', async () => {
+    _setEnableRetryDelayForTests(0)
+    process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        if (calls.installBundle.length === 1) return { ...ENABLE_RACE }
+        return { changed: true, application: 'restart-required', stage: 'install', bundle: 'dsh-m', packageResult: { exitCode: 0 } }
+      },
+    })
+    const res = await desktopSelfUpgradeViaTarball('dsh-m', '0.9.94', {}, d3Deps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['https://example.com/dsh-m-2.0.0.tgz', 'https://example.com/dsh-m-2.0.0.tgz'], 'D3 同 URL 重试一次')
+    assert.equal(res.needsRestart, true)
+    assert.equal((await readUpgradeIntent())?.status, 'resolved')
+  })
+})
+
 // ---------- 0.10.0 Task 7：D3 自升级专用通道（tarball 直覆盖）+ SELF_PKG core 缝改道 ----------
 
 describe('desktopSelfUpgradeViaTarball：D3 tarball 直覆盖（0.10.0）', () => {

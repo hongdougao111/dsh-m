@@ -514,6 +514,18 @@ async function runManagedInstall(
       ...(ctx.approvedBuilds && ctx.approvedBuilds.length > 0 ? { approvedBuilds: ctx.approvedBuilds } : {}),
     }))
 
+  // enable 阶段竞速自动重试（2026-10-02 本地增强的普适化，0.10.1 E2E 实证扩面）：
+  // 高频装卸/插件树重载窗口下 enable 阶段与应用侧竞速（实机实证「重试即愈」，skip-auth@0.4.1 事件二度实证）——
+  // 首腿、两步第二腿、兜底回装腿同享受限单次重试；cancelled / build-blocked / release-age 等其他失败形态不重试。
+  const installOnceRetryingEnable = async (spec: string): Promise<DesktopChangeResult> => {
+    const first = await installOnce(spec)
+    if (first.stage === 'enable' && (first.application === 'failed' || first.error)) {
+      if (enableRetryDelayMs > 0) await sleepMs(enableRetryDelayMs)
+      return installOnce(spec)
+    }
+    return first
+  }
+
   /** 失败映射（既有语义不变：cancelled / build-blocked 审批 / release-age 等待 / enable / 通用）。 */
   const mapFailure = async (change: DesktopChangeResult): Promise<never> => {
     if (change.application === 'cancelled') {
@@ -569,13 +581,8 @@ async function runManagedInstall(
     return { change, bundleName }
   }
 
-  let change = await installOnce()
-  // 本地增强：enable 阶段失败自动重试一次（受限单次 + 短退避；与高频装卸/插件树重载的竞速重试即愈；
-  // cancelled / build-blocked / release-age 等其他失败形态不重试）
-  if (change.stage === 'enable' && (change.application === 'failed' || change.error)) {
-    if (enableRetryDelayMs > 0) await sleepMs(enableRetryDelayMs)
-    change = await installOnce()
-  }
+  let change = await installOnceRetryingEnable(ctx.spec)
+  // （enable 阶段竞速自动重试已普适化进 installOnceRetryingEnable——首腿/两步第二腿/兜底回装腿/D3 同享）
   // ADR-0009 挂点3：双码失败 → 治理 → changed 则重试该命令一次（每次调用至多一次；
   // cancelled / build-blocked 不治理不重试）。仍败走既有 mapFailure（含账实分裂复读）；
   // 挂点3 已落盘的合并以短语并入失败 message 与成功 output（留痕契约含挂点3）。
@@ -604,24 +611,39 @@ async function runManagedInstall(
         `两步升级第一步（卸载旧版）失败（${ctx.pkg}；application=${removeChange.application ?? 'failed'}${removeChange.error?.code ? `、error=${removeChange.error.code}` : ''}）：未执行升级，请到官方 Desktop 插件页确认 ${ctx.pkg} 状态`,
       )
     }
-    change = await installOnce()
+    change = await installOnceRetryingEnable(ctx.spec)
     if (isTerminalFailure(change)) {
       const pendingAdd = pendingOf(change)
       const addDiagnostic = `${change.error?.diagnostic ?? ''}${change.error?.code ? `\n${change.error.code}` : ''}`.trim()
       const addCancelled = change.application === 'cancelled'
       const addBuildBlocked = change.packageResult?.kind === 'build-blocked' && pendingAdd.length > 0
       // 兜底回装旧版（R3）：回装腿失败（含其自身 build-blocked）= 缺席硬错误，降级失败真相优先
-      const rollbackChange = await installOnce(`${ctx.pkg}@${ctx.previousVersion}`)
+      const rollbackChange = await installOnceRetryingEnable(`${ctx.pkg}@${ctx.previousVersion}`)
       const pendingRollback = pendingOf(rollbackChange)
       if (isTerminalFailure(rollbackChange) || (rollbackChange.packageResult?.kind === 'build-blocked' && pendingRollback.length > 0)) {
+        // 0.10.1（E2E 实证，skip-auth@0.4.1 事件）：回装腿失败 ≠ 一定缺席——pnpm 可能已写入账面
+        // （激活阶段失败）。宣称缺席前实读账面，按实况分派恢复指引（账实相符优先，零误导性降级建议）。
+        let installedVersion: string | undefined
+        if (ctx.profileDir && ctx.listInstalled) {
+          try {
+            const row = (await ctx.listInstalled(ctx.profileDir)).items.find((it) => it.pkg === ctx.pkg)
+            installedVersion = row?.version
+          } catch {
+            // 复读失败按未知处理：保留既有缺席文案（含「可能」字样，不断言）
+          }
+        }
+        const message = installedVersion !== undefined
+          ? `升级失败且自动回装未完成，但账面显示 ${ctx.pkg}@${installedVersion} 已写入（激活阶段可能未完成）：请重启 Desktop 完成激活；如重启后仍异常，请在官方 Desktop 插件页手动处理${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
+          : `升级失败且自动回装旧版也失败（${ctx.pkg}@${ctx.previousVersion}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装 ${ctx.pkg}@${ctx.previousVersion}${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
         throw new DesktopOpsError(
           'rollback-failed',
-          `升级失败且自动回装旧版也失败（${ctx.pkg}@${ctx.previousVersion}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装 ${ctx.pkg}@${ctx.previousVersion}${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`,
+          message,
           {
             pkg: ctx.pkg,
             previousVersion: ctx.previousVersion,
             ...(addDiagnostic !== '' ? { addDiagnostic } : {}),
             ...(pendingRollback.length > 0 ? { pendingBuilds: pendingRollback } : {}),
+            ...(installedVersion !== undefined ? { installedVersion } : {}),
           },
         )
       }
@@ -881,7 +903,12 @@ async function desktopSelfUpgradeViaTarballLocked(
   })
   const resolveIntent = deps.resolveUpgradeIntent ?? defaultResolveUpgradeIntent
   try {
-    const change = changeOf(await service.installBundle(spec, { enabled: true }))
+    let change = changeOf(await service.installBundle(spec, { enabled: true }))
+    // 0.10.1：enable 阶段竞速自动重试（与 runManagedInstall 各腿同款；skip-auth@0.4.1 真机事件实证竞速窗口真实）
+    if (change.stage === 'enable' && (change.application === 'failed' || change.error)) {
+      if (enableRetryDelayMs > 0) await sleepMs(enableRetryDelayMs)
+      change = changeOf(await service.installBundle(spec, { enabled: true }))
+    }
     if (isTerminalFailure(change)) {
       const pending = pendingOf(change)
       if (change.application === 'cancelled') {
