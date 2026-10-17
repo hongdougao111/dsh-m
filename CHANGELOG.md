@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.9.94 重构+修复：变更结局描述客户端单源化（op-outcome）+ 补丁映射 YAML 引号宽容与重复键根治
+
+- **需求（2026-10-17 架构巡查 + grill 九决议）**：变更结局的呈现无 owning module——守卫拦截文案装配 main.jsx 三处逐字重复（0.9.93 toWire 收敛了线格式、client 侧呈现是已知残尾，`repairBasis` 后加时的多点位手补复发已实证）、升级成功文案两处逐字、builds 后缀四处拼装、superseded 五处；另：事务补偿对 workspace `patchedDependencies` **非双引号在场形态**（pnpm 的单引号/无引号书写）逐字判重失明——逐字判重可自造重复键文件、复读检查可假 committed（同包链经 strip 先摘在生产不可达，本项属防御面收敛与 fail-closed 补洞）。
+- **方案**：新纯模块 `src/client/op-outcome.js`（GLOSSARY「变更结局描述」入册）——工厂 `createOpOutcome(lookup)` 出成品文案（`createMarkdown(h)` 同款注入先例），`guardBlockedText`/`buildsSuffix`/`upgradeOkText`/`mutationFailed` 四函数；六处接线站点（五类投影）一行接线，流程特有分支（兼容弹窗/能力表拒绝/乐观提示）与 ToolCardRow 短版留守注记。D9：`verifyPatchMapping` workspace 支改 yaml 键成员判定（解析失败 fail-closed 报「复读失败」）；`restorePatchMapping` 追加前解析去重（同键任意引号形态在场即跳过，解析失败退化逐字判重）。
+- **验证**：全量 1567 测试全绿（新增 client-op-outcome 参数化矩阵 32 例——guardBlockedText/buildsSuffix/upgradeOkText to×activation 3×3 全交叉/mutationFailed × verb 五枚，期望串全手写字面量；事务补丁映射五钉例——单引号去重/无引号去重/模拟 pnpm 解析炸端到端/坏 YAML 假 committed→fail-closed/restore 退化不抛，夹具异包前提钉死）、typecheck 零错误；收敛锚 main.jsx `join(" | ")` 3→0、`mutationFailed` ≥ 6、`upgradeNotify` 解构随调用点清除；实施经计划评审四轮 15 项收敛 + 硬停点执行评审两轮（基线独立树复跑 1530 对照 + TDD 红→绿独立复演）后放行；实施计划见 `docs/plans/2026-10-17-op-outcome-and-verify-quote-fix-implementation-plan.md`。
+
 ### 0.9.93 重构：装后守卫线格式收敛至 InstallGuardError.toWire——加守卫字段编辑点 8 → 2（纯重构，线格式语义零变化）
 
 - **需求（2026-10-16 架构巡查摩擦点 3，巡查首推）**：`InstallGuardError` → 线格式的投影在手写 5 处逐字重复（host-api 409 payload / tools install+upgrade 两臂 / cli install+upgrade 两臂）+ client 再拼一次——加一个守卫字段要碰 8 处（类 + 5 投影 + client 读取 + 测试），`repairBasis` 后加时各点手补已实证过一次复发。
@@ -654,6 +660,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Refactor + fix in 0.9.94 — client-side mutation-outcome copy single-sourced (op-outcome) + patch-mapping YAML quote tolerance and duplicate-key elimination
+
+- **Need (2026-10-17 architecture walk + nine grilled decisions)**: the presentation of mutation outcomes had no owning module — the guard-interception copy was assembled verbatim three times in main.jsx (0.9.93's toWire converged the wire format while the client-side presentation remained the known leftover; the multi-point hand-patching recurrence when `repairBasis` was added had already been demonstrated once), the upgrade-success copy twice verbatim, the builds suffix four times, superseded five times; separately: the transaction's compensation was blind to **non-double-quoted in-place forms** of workspace `patchedDependencies` (pnpm's single-quoted/unquoted spellings) via verbatim duplicate checks — the verbatim check could fabricate a duplicate-key file and the read-back check could false-pass (the same-package chain is unreachable in production because strip removes it first; this item is defensive-surface convergence and a fail-closed gap-fill).
+- **Approach**: a new pure module `src/client/op-outcome.js` (GLOSSARY term "Mutation Outcome Copy" registered) — a factory `createOpOutcome(lookup)` producing finished copy (the `createMarkdown(h)` injection precedent) with four functions `guardBlockedText`/`buildsSuffix`/`upgradeOkText`/`mutationFailed`; six wiring sites (five projection families) become one-line calls, while flow-specific branches (compat dialog / capability-rejection banner / optimistic note) and the ToolCardRow short variant stay behind with an annotation. D9: the workspace leg of `verifyPatchMapping` now judges key membership via real yaml parsing (parse failure fails closed with "read-back failed"); `restorePatchMapping` parse-dedupes before appending (skip when the key exists in any quoting form; on parse failure it degrades to today's verbatim line check).
+- **Verification**: full suite 1567 green (new client-op-outcome parametrized matrix of 32 cases — guardBlockedText/buildsSuffix/upgradeOkText to×activation 3×3 full cross/mutationFailed × five verbs, expected strings all hand-written literals; five transaction patch-mapping pins — single-quote dedupe / unquoted dedupe / simulated pnpm parse-explosion end-to-end / malformed-YAML false-committed → fail-closed / restore degradation does not throw, with the cross-package fixture premise pinned), typecheck clean; convergence anchors in main.jsx: `join(" | ")` 3→0, `mutationFailed` ≥ 6, and the `upgradeNotify` destructure removed along with its call sites; released after a four-round 15-finding plan review plus a hard-stopped two-round execution review (baseline independently re-run at 1530 for comparison + TDD red→green independently re-enacted); implementation plan in `docs/plans/2026-10-17-op-outcome-and-verify-quote-fix-implementation-plan.md`.
 
 ### Refactor in 0.9.93 — post-install guard wire format converged onto InstallGuardError.toWire; adding a guard field now touches 8 → 2 points (pure refactor, zero wire-format semantic change)
 
