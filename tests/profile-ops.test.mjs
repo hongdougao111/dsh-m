@@ -489,6 +489,9 @@ describe('desktopUpgradeFromRegistry：already-installed 两步化 + 兜底回�
     assert.deepEqual(calls.removeBundle, ['pkg-a'])
     assert.equal(res.degraded, true)
     assert.equal(res.restoredTo, '0.9.0')
+    // 评审 R1-2：降级结果 version 落账为回装后实际版本（账实相符）；spec 保留尝试目标
+    assert.equal(res.version, '0.9.0')
+    assert.equal(res.spec, 'pkg-a@1.2.3')
   })
 
   it('T4：回装也失败 → rejects rollback-failed（缺席硬错误）', async () => {
