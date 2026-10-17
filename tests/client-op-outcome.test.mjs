@@ -120,6 +120,21 @@ describe('op-outcome · upgradeOkText（升级成功文案 ×2 逐字收敛原�
     assert.equal(oc.upgradeOkText({ pkg: 'p', sha: 'ffff0000aaaa', buildApprovals: ['x', 'y'], activation: 'unknown' }).text,
       'notify.upgraded{pkg=p,from=—,to=ffff000}notify.builds{names=x, y}notify.upgraded.activationUnknown')
   })
+
+  it('⑪ sha + client-only（3×3 交叉补全，评审 R1-②）：截断 + 不需重启', () => {
+    assert.deepEqual(oc.upgradeOkText({ pkg: 'p', sha: 'abcdef1234', activation: 'client-only' }),
+      { needsRestart: false, text: 'notify.upgraded{pkg=p,from=—,to=abcdef1}notify.upgraded.clientonly' })
+  })
+
+  it('⑫ latest + client-only（3×3 交叉补全）：兜底 + 不需重启', () => {
+    assert.deepEqual(oc.upgradeOkText({ pkg: 'p', activation: 'client-only' }),
+      { needsRestart: false, text: 'notify.upgraded{pkg=p,from=—,to=latest}notify.upgraded.clientonly' })
+  })
+
+  it('⑬ latest + unknown（3×3 交叉补全）：兜底 + 需重启', () => {
+    assert.deepEqual(oc.upgradeOkText({ pkg: 'p', activation: 'unknown' }),
+      { needsRestart: true, text: 'notify.upgraded{pkg=p,from=—,to=latest}notify.upgraded.activationUnknown' })
+  })
 })
 
 describe('op-outcome · mutationFailed（superseded/guard/plain × verb 五枚）', () => {
