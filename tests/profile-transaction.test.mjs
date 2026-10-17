@@ -18,6 +18,7 @@ import {
 } from '../lib/core/profile-transaction.js'
 import { snapshotFiles, atomicWriteFile } from '../lib/core/npm-integrity.js'
 import { classifyPnpmError, PNPM_OUTCOME_CODES } from '../lib/core/dsh-cli.js'
+import { parse as yamlParse } from 'yaml'
 
 // ---------- fixtures（事故同形摘要；Task 11 起共享 tests/fixtures/pnpm-errors.mjs） ----------
 
@@ -2053,5 +2054,141 @@ describe('B3 kill switch 集成（评审 R1-6，ADR-0012）', () => {
     } finally {
       delete process.env.DSHM_MIRROR_SYNC
     }
+  })
+})
+
+// ---------- 补丁映射 YAML 引号宽容与重复键根治（0.9.94 D9） ----------
+
+describe('补丁映射 YAML 引号宽容与重复键根治（0.9.94 D9）', () => {
+  let dir = ''
+  beforeEach(() => {
+    dir = compTempProfile()
+  })
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+    dir = ''
+  })
+
+  // 夹具前提（评审 N1，五例通用）：被补偿坏包一律 pkg-a；mapping 键一律异包名——
+  // strip（profile-transaction.ts:1123，正则宽容单/双/无引号、谓词与 mappingFor 同源）
+  // 恒先于 restore 摘除与坏包同名的补丁行，预置行必须异包才能幸存、红绿判读才成立。
+
+  function compSeedSingleQuoted() {
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), "packages:\n  - .\npatchedDependencies:\n  'scoped@1.0.0': patches/a.patch\n")
+  }
+
+  function mappingOnlyPrior(workspace) {
+    return { kind: 'mappingOnly', patchMapping: { workspace, manifest: [] } }
+  }
+
+  function compensateRequest(prior) {
+    return {
+      kind: 'compensate-install',
+      pkg: 'pkg-a',
+      evidence: { source: 'npm', manifestSpec: '2.0.0', resolvedVersion: '2.0.0', integrity: INTEGRITY },
+      prior,
+    }
+  }
+
+  function seedBadPkg() {
+    compInstallBadPkg(dir, 'pkg-a')
+    compWriteManifestDeps(dir, { 'pkg-a': '2.0.0' })
+    compWriteLock(dir, `  pkg-a@2.0.0:\n    resolution: {integrity: ${INTEGRITY}}`)
+  }
+
+  it('T1 单引号在场：restore 解析去重——不追加双引号行、ws 恰一次、事务 ok（今日红：两行并存）', async () => {
+    seedBadPkg()
+    compSeedSingleQuoted()
+    const tx = compFakeRunner(dir)
+    const res = await runProfileTransaction(
+      compensateRequest(mappingOnlyPrior([{ key: 'scoped@1.0.0', patchPath: 'patches/a.patch' }])),
+      { runner: () => tx.runner, profileDir: dir },
+    )
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const ws = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
+    assert.equal((ws.match(/scoped@1\.0\.0/g) || []).length, 1, `ws 应恰一次出现 scoped@1.0.0：\n${ws}`)
+    assert.ok(!ws.includes('"scoped@1.0.0"'), `不应追加双引号行：\n${ws}`)
+    assert.equal(yamlParse(ws).patchedDependencies['scoped@1.0.0'], 'patches/a.patch', 'yaml 可解析且键在场')
+  })
+
+  it('T2 无引号在场：restore 解析去重同款（今日红：两行并存）', async () => {
+    seedBadPkg()
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - .\npatchedDependencies:\n  other@1.0.0: patches/other.patch\n')
+    const tx = compFakeRunner(dir)
+    const res = await runProfileTransaction(
+      compensateRequest(mappingOnlyPrior([{ key: 'other@1.0.0', patchPath: 'patches/other.patch' }])),
+      { runner: () => tx.runner, profileDir: dir },
+    )
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const ws = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
+    assert.equal((ws.match(/other@1\.0\.0/g) || []).length, 1, `ws 应恰一次出现 other@1.0.0：\n${ws}`)
+    assert.ok(!ws.includes('"other@1.0.0"'), `不应追加双引号行：\n${ws}`)
+    assert.equal(yamlParse(ws).patchedDependencies['other@1.0.0'], 'patches/other.patch', 'yaml 可解析且键在场')
+  })
+
+  it('T3 模拟 pnpm 解析炸（端到端）：restore 造重复键 → add 解析抛 → 今日非 committed；修复后无重复、一次过', async () => {
+    seedBadPkg()
+    compWriteLock(dir, `  pkg-a@2.0.0:\n    resolution: {integrity: ${INTEGRITY_2}}\n  pkg-a@1.0.0:\n    resolution: {integrity: ${INTEGRITY}}`)
+    compSeedSingleQuoted()
+    const tx = compFakeRunner(dir, {
+      // 模拟真实 pnpm：先解析 workspace 再动笔，遇重复键抛（yaml@2.9.1 实测 "Map keys must be unique"）
+      addBehavior: async (arg) => {
+        yamlParse(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8'))
+        compWriteManifestDeps(dir, { ...compManifestDeps(dir), 'pkg-a': arg.split('@').slice(1).join('@') })
+        const pkgDir = join(dir, 'node_modules', 'pkg-a')
+        mkdirSync(pkgDir, { recursive: true })
+        writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: 'pkg-a', version: '1.0.0' }))
+        return { class: 'ok', output: 'restored', buildApprovals: [], fallbackAllBuilds: false }
+      },
+    })
+    const res = await runProfileTransaction(
+      {
+        kind: 'compensate-install',
+        pkg: 'pkg-a',
+        evidence: { source: 'npm', manifestSpec: '2.0.0', resolvedVersion: '2.0.0', integrity: INTEGRITY_2 },
+        prior: {
+          kind: 'dependency',
+          state: {
+            manifestSpec: '^1.0.0', installSpec: '^1.0.0', resolvedVersion: '1.0.0', sourceKind: 'npm',
+            integrity: INTEGRITY, lockResolution: { version: '1.0.0', integrity: INTEGRITY },
+            patchMapping: { workspace: [{ key: 'scoped@1.0.0', patchPath: 'patches/a.patch' }], manifest: [] }, restorable: true,
+          },
+        },
+      },
+      { runner: () => tx.runner, profileDir: dir },
+    )
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.deepEqual(tx.calls.add, ['pkg-a@^1.0.0'])
+    const ws = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
+    assert.equal((ws.match(/scoped@1\.0\.0/g) || []).length, 1, `ws 应无重复键：\n${ws}`)
+    assert.equal(JSON.parse(readFileSync(join(dir, 'node_modules', 'pkg-a', 'package.json'), 'utf8')).version, '1.0.0')
+  })
+
+  it('T4 坏 YAML + 双引号子串在场：今日假 committed；修复后 fail-closed 报「复读失败」（新行为钉例）', async () => {
+    seedBadPkg()
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - .\npatchedDependencies: [unclosed "scoped@1.0.0"\n')
+    const tx = compFakeRunner(dir)
+    const res = await runProfileTransaction(
+      compensateRequest(mappingOnlyPrior([{ key: 'scoped@1.0.0', patchPath: 'patches/a.patch' }])),
+      { runner: () => tx.runner, profileDir: dir },
+    )
+    assert.equal(res.status, 'manual-repair', JSON.stringify(res))
+    assert.equal(res.failure.code, 'COMPENSATE_RESTORE_FAILED')
+    assert.ok(res.failure.note.includes('pnpm-workspace.yaml 复读失败'), `note 应含复读失败：${res.failure.note}`)
+  })
+
+  it('T5 坏 YAML 无子串：restore 退化逐字追加不抛，终态同为 fail-closed「复读失败」而非 INTERNAL_ERROR', async () => {
+    seedBadPkg()
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - .\npatchedDependencies: [unclosed\n')
+    const tx = compFakeRunner(dir)
+    const res = await runProfileTransaction(
+      compensateRequest(mappingOnlyPrior([{ key: 'scoped@1.0.0', patchPath: 'patches/a.patch' }])),
+      { runner: () => tx.runner, profileDir: dir },
+    )
+    assert.equal(res.status, 'manual-repair', JSON.stringify(res))
+    assert.equal(res.failure.code, 'COMPENSATE_RESTORE_FAILED', `不应 INTERNAL_ERROR：${JSON.stringify(res.failure)}`)
+    assert.ok(res.failure.note.includes('pnpm-workspace.yaml 复读失败'), `note 应含复读失败：${res.failure.note}`)
+    const ws = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
+    assert.ok(ws.includes('  "scoped@1.0.0": patches/a.patch'), 'restore 退化分支仍逐字追加（保守不收紧）')
   })
 })

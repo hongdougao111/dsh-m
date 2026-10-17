@@ -40,6 +40,7 @@ import { setLivePluginDisabled } from './live-plugin.js'
 import { warmPackumentFor } from './packument.js'
 import { syncNpmmirrorPackage } from './npm-route.js'
 import { clearAllLatestCache } from './latest-cache.js'
+import { parse as yamlParse } from 'yaml'
 import {
   assertNpmIntegrity,
   atomicWriteFile,
@@ -993,6 +994,23 @@ async function uninstall(
 
 // ---------- compensate-install 门（M2 Task 3：专用补偿事务，四边界见 DESIGN §3） ----------
 
+/** 解析 pnpm-workspace.yaml 的 patchedDependencies 键集合（0.9.94 D9）。
+ *  文本不可解析（坏 YAML / 重复键）→ null（保守，不抛）——调用方据此走退化或 fail-closed；
+ *  空值/缺省（parse 得 null/undefined）与数组形态一律按空集处理（本机实证 parse('') === null；
+ *  防 typeof null === 'object' 朴素实现令 Object.keys(null) 抛错走 INTERNAL_ERROR——评审 N5）。 */
+function workspacePatchedKeys(text: string): Set<string> | null {
+  let doc: unknown
+  try {
+    doc = yamlParse(text)
+  } catch {
+    return null
+  }
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return new Set<string>()
+  const patched = (doc as Record<string, unknown>).patchedDependencies
+  if (patched === null || typeof patched !== 'object' || Array.isArray(patched)) return new Set<string>()
+  return new Set<string>(Object.keys(patched as Record<string, unknown>))
+}
+
 /** patchMapping 结构化双落点恢复：workspace（pnpm-workspace.yaml patchedDependencies）与 manifest（pnpm.patchedDependencies）。 */
 async function restorePatchMapping(
   profileDir: string,
@@ -1011,9 +1029,13 @@ async function restorePatchMapping(
     if (!lines.some((l) => l.trim() === 'patchedDependencies:')) {
       lines.push('patchedDependencies:')
     }
+    // 0.9.94 D9：解析去重——同键任意引号形态（pnpm 的单引号/无引号书写）在场即跳过，杜绝对重复键文件的自造；
+    // 解析失败（坏 YAML/重复键）退化为今日逐字判重（保守不收紧）
+    const existingKeys = workspacePatchedKeys(text)
     for (const entry of mapping.workspace) {
       const line = `  ${JSON.stringify(entry.key)}: ${entry.patchPath}`
-      if (!lines.includes(line)) lines.push(line)
+      const present = existingKeys !== null ? existingKeys.has(entry.key) : lines.includes(line)
+      if (!present) lines.push(line)
     }
     await atomicWriteFile(wsFile, Buffer.from(lines.join('\n'), 'utf8'))
     heal.push({ code: 'PATCH_MAPPING_RESTORED', note: `已恢复 pnpm-workspace.yaml 补丁映射（${mapping.workspace.map((m) => m.key).join('、')}）` })
@@ -1043,8 +1065,12 @@ async function verifyPatchMapping(profileDir: string, mapping: { workspace: Arra
   if (mapping.workspace.length > 0) {
     try {
       const text = await readFile(join(profileDir, 'pnpm-workspace.yaml'), 'utf8')
+      // 0.9.94 D9：yaml 键成员判定替代双引号子串扫描——单引号/无引号在场形态不再被误判「复读缺失」；
+      // 解析失败（坏 YAML/重复键）fail-closed 报「复读失败」（与 manifest 支 JSON 解析失败同款纪律）
+      const keys = workspacePatchedKeys(text)
+      if (keys === null) return 'pnpm-workspace.yaml 复读失败：YAML 无法解析'
       for (const entry of mapping.workspace) {
-        if (!text.includes(JSON.stringify(entry.key))) return `workspace 补丁映射复读缺失：${entry.key}`
+        if (!keys.has(entry.key)) return `workspace 补丁映射复读缺失：${entry.key}`
       }
     } catch (err) {
       return `pnpm-workspace.yaml 复读失败：${errText(err)}`
