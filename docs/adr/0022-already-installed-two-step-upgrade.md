@@ -11,6 +11,7 @@ DSH 0.2.1-rc.1 起官方 `dsh-plugin-manager` 给 `installBundle()` 加了安装
 3. **通道分治**：第三方升级走官方两步；**dsh-m 自升级独享 tarball 直覆盖专用通道（D3）**——`desktopUpgradeLocked` / `desktopInstallLocked` 入口检测 `pkg === SELF_PKG('dsh-m')` 即改道 `desktopSelfUpgradeViaTarball`（core 缝单点收敛，host-api / Agent 工具 / 客户端零特判）。desktop 上任何「升级 dsh-m 自身」的动作绝不落入通用两步——remove+add 对调用者自身是破坏性路径。install 路径撞守卫同样静默两步化（已装态 install = 升级）；dsh-m 全新安装走既有单步。
 4. **D3 管线**：`npmLatest` 精确版本 → 生效 registry packument 的 `dist.tarball`（`npmTarballUrl`，复用 ADR-0012 履约阶梯）→ 预写 intent → `installBundle(tarballUrl, {enabled:true})` 直覆盖 → 终态收口。恒 panel 语义零外部日志（ADR-0018 不变量）；生效语义忠实透传宿主 `application`（`applied` → 无需重启、`restart-required` → 提示重启，0.9.22 `classifyUpgradeActivation` 降级为参考）。同版本 no-op；URL 构造失败发生在预写之前（零落盘）；install 终态失败旧版不受影响（spike 实证）。
 5. **开机对账（崩溃兜底网）**：intent ledger（`$DSH_HOME/dshm/self-upgrade-intent.json`，env `DSHM_UPGRADE_INTENT_FILE` 隔离测试）记录 delegated 预写；D3 正常路径在本进程内就地 resolve，仅当进程死于 promise 悬垂（活交换中进程死亡）时由下一次 `self-check` 每进程一次比对收口（版本相符 → `intentResolved.ok`，不符 → failed）。定位为兜底网而非常规通道——不引入宿主启动装配点。
+6. **D3 通道的两项豁免（评审 R1-1/R1-6 增补，2026-10-17）**：①**不做 release-age 等待期预检**——pnpm 的 minimumReleaseAge 校验作用于 registry 解析面，tarball URL 依赖不受其约束（spike 实证：2 小时新的 URL 依赖未被供应链策略拦截），预检在 D3 上没有可触发的拦截点；自升级另经确认框显式授权、单一包、即时性即通道目的。两臂形态如实记载：upgrade 臂改道点在通用预检**之前**（有意为之），install 臂改道点在通用预检**之后**——dsh-m 已装态的 install 调用照常过闸，两臂不对称是入口位置的自然结果、非语义分叉（同落 D3 管线）。②**不做 ADR-0009 挂点2 排除块登记**——登记的对象是「registry 解析出的 young 版本」，tarball 直装不产生该对象；通道分治下 dsh-m 后续升级恒走 D3，排除块缺登记不产生后果。
 
 ## Considered Options
 
@@ -21,7 +22,7 @@ DSH 0.2.1-rc.1 起官方 `dsh-plugin-manager` 给 `installBundle()` 加了安装
 
 ## Consequences
 
-- **降级恢复成为新结局**：升级失败但已自动恢复旧版以「成功形态 + degraded 标记」返回，客户端投影为 warn（`op.degraded`，不入「升级成功 vX→vY」成功臂）；操作泵复用 `'warned'` 状态落账（零新状态），meta 携带 `{degraded, restoredTo}`，设置页红点沿用 `opsAttention` 对 warned 的既有统计；× 删除走既有通道（删除不改真实状态）。
+- **降级恢复成为新结局**：升级失败但已自动恢复旧版以「成功形态 + degraded 标记」返回，客户端投影为 warn（`op.degraded`，不入「升级成功 vX→vY」成功臂）；操作泵复用 `'warned'` 状态落账（零新状态），meta 携带 `{degraded, restoredTo}`，设置页红点沿用 `opsAttention` 对 warned 的既有统计；× 删除走既有通道（删除不改真实状态）。结果的 `version` 字段落账为回装后实际版本（= restoredTo，账实相符优先），`spec` 字段保留尝试目标（评审 R1-2）。
 - **URL 形态 spec 限于自升级通道**：第三方升级仍走 registry 精确 spec（两步化），manifest 中第三方条目保持干净形态；仅 dsh-m 自身的 manifest spec 允许 URL 形态（0.10.0 装机走官方插件页 remove + install 精确版本后重钉为干净形态）。
 - **intent ledger 是 ADR-0018 的正交件**：面板通道零外部日志不变——delegated 预写不进 external journal，落独立单条覆盖写的 ledger；损坏容错（改名 `.corrupt-<ts>` 隔离后按空处理）与 external journal 同款纪律。
 - **宿主行为锚**：若未来宿主改变守卫语义（如允许覆盖安装），两步化不再被触发（错误码不再出现），D3 通道与两步化互不依赖、可独立退役。
