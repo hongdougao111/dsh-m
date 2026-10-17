@@ -11,6 +11,8 @@ import { join } from 'node:path'
 
 import { createApiDispatcher } from '../lib/core/host-api.js'
 import { createRegistryController } from '../lib/core/registry-controller.js'
+import { desktopUpgradeFromRegistry } from '../lib/core/profile-ops.js'
+import { readUpgradeIntent } from '../lib/core/upgrade-intent.js'
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
@@ -55,7 +57,7 @@ async function callApi(dispatcher, args) {
 /** 独立 setup：trust/profile/desktop 行为全可编排；业务 deps 为记录型桩。 */
 function setupTrust({ trust, profile, overrides = {} } = {}) {
   const controller = createRegistryController({})
-  const calls = { listInstalled: [], scheduleRestart: [], upgrade: [], uninstall: [], selfUpgrade: [], desktopInstall: [], desktopToggle: [], desktopUpgrade: [], desktopUninstall: [], toggle: [], existingIds: [] }
+  const calls = { listInstalled: [], scheduleRestart: [], upgrade: [], uninstall: [], selfUpgrade: [], desktopInstall: [], desktopToggle: [], desktopUpgrade: [], desktopUninstall: [], desktopSelfUpgrade: [], toggle: [], existingIds: [] }
   const dispatcher = createApiDispatcher({
     controller,
     pkg: { name: 'dsh-m', version: '0.0.0-test' },
@@ -100,6 +102,10 @@ function setupTrust({ trust, profile, overrides = {} } = {}) {
         calls.desktopInstall.push({ id, opts })
         return { id, pkg: 'pkg-d', spec: 'pkg-d@1.0.0', version: '1.0.0', buildApprovals: [], fallbackAllBuilds: false, needsRestart: true, output: '', via: 'desktop-manager' }
       },
+      desktopSelfUpgradeViaTarball: async (pkg, currentVersion, opts) => {
+        calls.desktopSelfUpgrade.push({ pkg, currentVersion, opts })
+        return { id: pkg, pkg, spec: `https://example.com/${pkg}-9.9.9.tgz`, version: '9.9.9', buildApprovals: [], fallbackAllBuilds: false, needsRestart: true, output: '', via: 'desktop-manager' }
+      },
       desktopToggle: async (pkg, enabled, opts) => {
         calls.desktopToggle.push({ pkg, enabled, opts })
         return { pkg, enabled, applied: 'live', via: 'delegate', warnings: [] }
@@ -126,10 +132,13 @@ beforeEach(() => {
   process.env.DSHM_CACHE_DIR = cacheRoot
   // 0.9.79：mutation 用例可能落真实实现的外部操作日志——隔离 journal，不触碰真实 ~/.dsh
   process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(cacheRoot, 'external-operations.json')
+  // 0.10.0：D3 全链用例走真实 intent ledger——隔离，不触碰真实 ~/.dsh
+  process.env.DSHM_UPGRADE_INTENT_FILE = join(cacheRoot, 'self-upgrade-intent.json')
 })
 afterEach(() => {
   delete process.env.DSHM_CACHE_DIR
   delete process.env.DSHM_EXTERNAL_JOURNAL_FILE
+  delete process.env.DSHM_UPGRADE_INTENT_FILE
   if (cacheRoot) rmSync(cacheRoot, { recursive: true, force: true })
 })
 
@@ -256,10 +265,50 @@ describe('host-api profile 能力表路由（Task 8）', () => {
 
     const su = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'self-upgrade' } })
     assert.equal(su.status, 200)
-    assert.equal(su.body.needsRestart, true)
-    assert.equal(calls.desktopInstall.length, 1, 'self-upgrade 走 desktopInstall(dsh-m)')
-    assert.equal(calls.desktopInstall[0].id, 'dsh-m')
+    assert.equal(su.body.needsRestart, true, 'needsRestart 透传（R10）')
+    assert.equal(su.body.version, '9.9.9')
+    assert.equal(calls.desktopSelfUpgrade.length, 1, 'self-upgrade 走 D3 desktopSelfUpgradeViaTarball(dsh-m)')
+    assert.equal(calls.desktopSelfUpgrade[0].pkg, 'dsh-m')
+    assert.equal(calls.desktopSelfUpgrade[0].currentVersion, '0.0.0-test')
+    assert.equal(calls.desktopInstall.length, 0, '不再走 desktopInstall（0.2.1 守卫必拦路径已弃）')
     assert.equal(calls.selfUpgrade.length, 0, 'web 事务不得被触达')
+  })
+
+  // 0.10.0 T17 端到端钉（host-api 面）：upgrade(dsh-m) 经真链 desktopUpgradeFromRegistry → core 缝 → D3，
+  // host-api 层零特判（改道唯一执行点在 core 缝）。
+  it('0.10.0 改道端到端：desktop upgrade(dsh-m) → installBundle 恰一次收 tarball URL、removeBundle 零调用', async () => {
+    const wire = { installBundle: [], removeBundle: [] }
+    const service = {
+      listPlugins: async () => [],
+      setPluginEnabled: async () => ({}),
+      setBundleEnabled: async () => ({}),
+      installBundle: async (spec, options) => {
+        wire.installBundle.push({ spec, options })
+        return { changed: true, application: 'restart-required', stage: 'install', bundle: 'dsh-m', packageResult: { exitCode: 0 } }
+      },
+      removeBundle: async (name) => {
+        wire.removeBundle.push(name)
+        return { changed: true, application: 'applied', stage: 'remove', bundle: name }
+      },
+      listBundles: async () => [{ name: 'dsh-m', installed: true, enabled: true }],
+    }
+    const { dispatcher } = setupTrust({
+      trust: () => undefined,
+      profile: desktopProfile,
+      overrides: {
+        desktopUpgrade: desktopUpgradeFromRegistry,
+        getService: () => service,
+        npmLatest: async () => ({ version: '0.10.0' }),
+        npmTarballUrl: async () => 'https://example.com/dsh-m-0.10.0.tgz',
+        listInstalled: async () => ({ items: [{ pkg: 'dsh-m', name: 'dsh-m', version: '0.9.94' }], others: [], complete: true }),
+      },
+    })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'upgrade', pkg: 'dsh-m' } })
+    assert.equal(res.status, 200)
+    assert.deepEqual(wire.installBundle.map((c) => c.spec), ['https://example.com/dsh-m-0.10.0.tgz'])
+    assert.deepEqual(wire.removeBundle, [], '自升级绝不 remove+add')
+    assert.equal(res.body.needsRestart, true)
+    assert.equal((await readUpgradeIntent())?.status, 'resolved', 'D3 intent 已被本进程就地收口')
   })
 
   it('desktop：install 路由到 Desktop adapter（携带 profile 名），不走 web 事务', async () => {

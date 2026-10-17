@@ -22,9 +22,10 @@ import {
 } from './market.js'
 import { runProfileTransaction, TransactionError, makeNpmWarmPackument } from './profile-transaction.js'
 import { listExternalOperations, clearExternalOperations, removeExternalOperation } from './external-journal.js'
-import { readInstalledPluginReadme, type PluginReadme } from './installed.js'
+import { readUpgradeIntent, resolveUpgradeIntent, writeUpgradeIntent } from './upgrade-intent.js'
+import { readInstalledPluginReadme, listInstalledPlugins, type PluginReadme } from './installed.js'
 import { loadPrimaryScreenshots } from './primary-screenshots.js'
-import { isNewerVersion, npmLatest, npmPackumentReadme } from './versions.js'
+import { isNewerVersion, npmLatest, npmTarballUrl, npmPackumentReadme } from './versions.js'
 import { getCommunitySummary } from './community.js'
 import type { RegistryController, RegistryControllerSnapshot } from './registry-controller.js'
 import { RegistryConfigError } from './registry-controller.js'
@@ -34,7 +35,7 @@ import { servingPort, scheduleRestart } from './restart.js'
 import { togglePlugin, ToggleError, type PluginManagerLike } from './toggle.js'
 import { IncompatibleError } from './compat-check.js'
 import { ProfileUnsupportedError, assertWriteAllowed, type ActiveProfile } from './active-profile.js'
-import { DesktopOpsError, desktopInstallFromRegistry, desktopToggle, desktopUninstall, desktopUpgradeFromRegistry, type DesktopManagerLike } from './profile-ops.js'
+import { DesktopOpsError, desktopInstallFromRegistry, desktopToggle, desktopUninstall, desktopUpgradeFromRegistry, desktopSelfUpgradeViaTarball, type DesktopManagerLike } from './profile-ops.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** 宿主信任检查的统一签名（生产 = 官方 requestRejection 委派；测试可注入）。 */
@@ -95,6 +96,15 @@ export interface HostApiOverrides {
   clearExternalOperations?: typeof clearExternalOperations
   /** 0.9.82 修订 R2-3：外部 failed 行单条 ✕ 的服务端 per-id 删除注入位（测试；缺省 = 真实现）。 */
   removeExternalOperation?: typeof removeExternalOperation
+  /** 0.10.0 D3 自升级专用通道（desktop self-upgrade；测试注入假件）。 */
+  desktopSelfUpgradeViaTarball?: typeof desktopSelfUpgradeViaTarball
+  /** 0.10.0 开机对账（self-check 每进程一次；测试注入真实现 + DSHM_UPGRADE_INTENT_FILE 隔离）。 */
+  readUpgradeIntent?: typeof readUpgradeIntent
+  resolveUpgradeIntent?: typeof resolveUpgradeIntent
+  writeUpgradeIntent?: typeof writeUpgradeIntent
+  /** 0.10.0 D3 全链测试注入位（tarball 解析 / 已装列表，经 desktop deps 透传；缺省 = 真实现）。 */
+  npmTarballUrl?: typeof npmTarballUrl
+  listInstalled?: typeof listInstalledPlugins
 }
 
 export interface HostApiContext {
@@ -297,12 +307,20 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
     desktopToggle: ctx.deps?.desktopToggle ?? desktopToggle,
     desktopUninstall: ctx.deps?.desktopUninstall ?? desktopUninstall,
     desktopUpgrade: ctx.deps?.desktopUpgrade ?? desktopUpgradeFromRegistry,
+    desktopSelfUpgradeViaTarball: ctx.deps?.desktopSelfUpgradeViaTarball ?? desktopSelfUpgradeViaTarball,
+    readUpgradeIntent: ctx.deps?.readUpgradeIntent ?? readUpgradeIntent,
+    resolveUpgradeIntent: ctx.deps?.resolveUpgradeIntent ?? resolveUpgradeIntent,
+    writeUpgradeIntent: ctx.deps?.writeUpgradeIntent ?? writeUpgradeIntent,
+    npmTarballUrl: ctx.deps?.npmTarballUrl ?? npmTarballUrl,
+    listInstalled: ctx.deps?.listInstalled ?? listInstalledPlugins,
     ensureService: ctx.deps?.ensureService,
     listExternalOperations: ctx.deps?.listExternalOperations ?? listExternalOperations,
     clearExternalOperations: ctx.deps?.clearExternalOperations ?? clearExternalOperations,
     removeExternalOperation: ctx.deps?.removeExternalOperation ?? removeExternalOperation,
   }
   const cfg = (): typeof ctx.controller.config => ctx.controller.config
+  // 0.10.0：开机对账每进程一次（dispatcher 生命周期 = 宿主一次 apply）
+  let selfCheckIntentDone = false
   // 0.9.0：宿主信任检查委派（含 ping 与未知 method，fail-closed）；
   // profile 为 host 生命周期内不可变对象（host.ts apply 期解析一次）
   const rejectRequest: RequestTrustCheck = ctx.deps?.rejectRequest ?? (() => 403)
@@ -334,30 +352,54 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           break
 
         case 'self-check': {
+          // 0.10.0 开机对账（崩溃兜底网，每进程一次）：上进程若死于自升级 promise 悬垂，delegated
+          // intent 遗留至此——与本进程实际版本比对收口；本进程内 D3 已就地 resolve 的（或无悬垂）
+          // 幂等 no-op。ADR-0018：读写独立 intent ledger，零外部日志。对账自身故障零涟漪。
+          let intentResolved: { ok: boolean; target: string; installedVersion?: string } | undefined
+          if (!selfCheckIntentDone) {
+            selfCheckIntentDone = true
+            try {
+              const rec = await d.readUpgradeIntent()
+              if (rec && rec.status === 'delegated') {
+                const match = rec.version === ctx.pkg.version
+                await d.resolveUpgradeIntent({ ok: match, installedVersion: match ? ctx.pkg.version : undefined })
+                intentResolved = { ok: match, target: rec.target, ...(match ? { installedVersion: ctx.pkg.version } : {}) }
+              }
+            } catch {
+              // delegated 残留下次进程再收口；绝不阻塞 self-check
+            }
+          }
           try {
             const latest = await d.npmLatest(ctx.pkg.name, cfg().timeoutMs ?? 20_000)
             const outdated = isNewerVersion(latest.version, ctx.pkg.version)
             // ahead（0.8.0）：本地 dev 版领先 npm 发布——设置页改显「本地开发版」而非误导性的旧「npm 最新」
             const ahead = !outdated && latest.version !== ctx.pkg.version
-            payload = { current: ctx.pkg.version, latest: latest.version, outdated, ahead }
+            payload = { current: ctx.pkg.version, latest: latest.version, outdated, ahead, ...(intentResolved ? { intentResolved } : {}) }
           } catch (err) {
-            payload = { current: ctx.pkg.version, latest: null, outdated: false, ahead: false, error: err instanceof Error ? err.message : String(err) }
+            payload = { current: ctx.pkg.version, latest: null, outdated: false, ahead: false, error: err instanceof Error ? err.message : String(err), ...(intentResolved ? { intentResolved } : {}) }
           }
           break
         }
 
         case 'self-upgrade': {
           assertWriteAllowed(profile, 'self-upgrade')
-          // 0.9.8：desktop → 官方管理器覆盖安装 dsh-m@latest（dsh-market 同策略实证；
-          // 生效仍需重启 Desktop——banner.desktop 指引由客户端 needsRestart 通道给出）
+          // 0.10.0 D3 自升级专用通道（desktop）：tarball 直覆盖。desktopInstall 的 registry spec 在
+          // 0.2.1 宿主必撞 already-installed 守卫，而 remove+add 对调用者自身是破坏性路径（R6：自升级
+          // 绝不落入通用两步——改道唯一执行点在 core 缝，此处调 D3 入口即语义同源）；tarball spec
+          // 不受守卫约束（spike 实证）。恒 panel 语义零外部日志（ADR-0018），intent 预写/收口在 core 层。
           if (profile.kind !== 'web') {
-            const managed = await d.desktopInstall(ctx.pkg.name, cfg(), {
-              namespace: 'host',
-              profile: profile.name,
-              profileDir: profile.dir,
+            const managed = await d.desktopSelfUpgradeViaTarball(ctx.pkg.name, ctx.pkg.version, {
+              timeoutMs: cfg().timeoutMs,
               signal,
-              channel: 'panel', // 0.9.79：面板自升级零外部记录（漏标 = 落 external，违反面板零记录不变量）
-            }, { getService: d.getService, ensureService: d.ensureService })
+            }, {
+              getService: d.getService,
+              ensureService: d.ensureService,
+              npmLatest: d.npmLatest,
+              npmTarballUrl: d.npmTarballUrl,
+              writeUpgradeIntent: d.writeUpgradeIntent,
+              resolveUpgradeIntent: d.resolveUpgradeIntent,
+              listInstalled: d.listInstalled,
+            })
             if ('needsBuildApproval' in managed) {
               // build-blocked（自升级罕见）：结构化透出，不冒充成功
               payload = { ...managed }
@@ -368,7 +410,8 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               version: managed.version,
               buildApprovals: managed.buildApprovals ?? [],
               fallbackAllBuilds: false,
-              needsRestart: true as const,
+              // R10：忠实透传宿主 application——applied/overridden → false；restart-required → true
+              needsRestart: managed.needsRestart,
             }
             break
           }
@@ -592,7 +635,16 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               profileDir: profile.dir,
               signal,
               channel: 'panel',
-            }, { getService: d.getService, ensureService: d.ensureService })) }
+            }, {
+              getService: d.getService,
+              ensureService: d.ensureService,
+              // 0.10.0：R5 previousVersion / SELF_PKG 缝改道注入透传（生产缺省 = 真实现；测试面经 overrides）
+              npmLatest: d.npmLatest,
+              listInstalled: d.listInstalled,
+              npmTarballUrl: d.npmTarballUrl,
+              writeUpgradeIntent: d.writeUpgradeIntent,
+              resolveUpgradeIntent: d.resolveUpgradeIntent,
+            })) }
             break
           }
           const version = typeof body.version === 'string' ? body.version : undefined
@@ -649,7 +701,16 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               profileDir: profile.dir,
               signal,
               channel: 'panel',
-            }, { getService: d.getService, ensureService: d.ensureService })) }
+            }, {
+              getService: d.getService,
+              ensureService: d.ensureService,
+              // 0.10.0：两步化 previousVersion / SELF_PKG 缝改道 → D3 全链注入透传（生产缺省 = 真实现）
+              npmLatest: d.npmLatest,
+              listInstalled: d.listInstalled,
+              npmTarballUrl: d.npmTarballUrl,
+              writeUpgradeIntent: d.writeUpgradeIntent,
+              resolveUpgradeIntent: d.resolveUpgradeIntent,
+            })) }
             break
           }
           const result = await d.upgradePlugin(target, cfg(), {

@@ -356,6 +356,24 @@ export async function npmVersion(
   }
 }
 
+/**
+ * 精确版本 tarball URL（0.10.0，D3 自升级专用通道的取 URL 腿）：
+ * `npmVersion` 薄封装——复用同一 L2① 履约阶梯（ADR-0012，含镜像 sync 腿与 npmjs 兜底），
+ * 不新增 packument 面。tarball 缺失 / 版本不存在 → 可读错误上抛。
+ */
+export async function npmTarballUrl(
+  pkg: string,
+  version: string,
+  timeoutMs = 20_000,
+  signal?: AbortSignal,
+  registry?: string,
+  deps?: NpmVersionDeps,
+): Promise<string> {
+  const detail = await npmVersion(pkg, version, timeoutMs, signal, registry, deps)
+  if (!detail.tarball) throw new Error(`${pkg}@${version} packument 缺 dist.tarball`)
+  return detail.tarball
+}
+
 export interface NpmLatestDeps {
   fetchJsonLimited?: typeof fetchJsonLimited
 }

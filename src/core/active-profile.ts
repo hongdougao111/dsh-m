@@ -47,7 +47,7 @@ export const WRITE_GUIDANCE: Record<ProfileAction, string> = {
   'set-enabled': '',
   upgrade: 'Desktop 暂不支持在市场内升级插件：请在官方 Desktop 的插件管理（Settings → Plugins）检查更新，或回到 DSH Web 使用 dsh-m 升级。',
   uninstall: 'Desktop 暂不支持在市场内卸载插件：请使用官方 Desktop 的插件管理（Settings → Plugins）卸载。',
-  'self-upgrade': 'Desktop 暂不支持 dsh-m 自更新：请在 DSH Web 端执行，或关注官方 Desktop 的插件更新入口。',
+  'self-upgrade': '当前宿主形态不支持面板内自更新：请在官方 Settings → Plugins 对 dsh-m 执行 remove + install（精确版本），或完全退出 Desktop 后用 `dsh plugin --profile desktop add dsh-m@<版本>`。',
   restart: 'Desktop 不由 dsh-m 重启：请退出并重新打开 Desktop 应用（关闭窗口可能只是隐藏），让新安装的插件生效。',
 }
 

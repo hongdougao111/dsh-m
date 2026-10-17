@@ -28,7 +28,8 @@ import { loadRegistry as defaultLoadRegistry } from './registry.js'
 import { fetchCommunityCatalog as defaultFetchCommunityCatalog } from './community.js'
 import { listInstalledPlugins as defaultListInstalled } from './installed.js'
 import { precheckNpmCompat, IncompatibleError, type CompatIssue } from './compat-check.js'
-import { npmLatest as defaultNpmLatest, githubLatestTag as defaultGithubLatestTag } from './versions.js'
+import { npmLatest as defaultNpmLatest, npmTarballUrl as defaultNpmTarballUrl, githubLatestTag as defaultGithubLatestTag } from './versions.js'
+import { writeUpgradeIntent as defaultWriteUpgradeIntent, resolveUpgradeIntent as defaultResolveUpgradeIntent } from './upgrade-intent.js'
 import { classifyUpgradeActivation, type ActivationClassification } from './activation.js'
 import { togglePlugin, ToggleError, type PluginManagerRow } from './toggle.js'
 import { describeReleaseAgeFailure, releaseAgePrecheck, type ReleaseAgePrecheckDeps } from './release-age.js'
@@ -50,7 +51,15 @@ export interface DesktopManagerLike {
   listBundles?(): Promise<Array<{ name: string; installed?: boolean; enabled?: boolean }>>
 }
 
-export type DesktopOpsErrorCode = 'no-manager' | 'install-refused' | 'enable-failed' | 'remove-failed' | 'verify-failed' | 'release-age-wait'
+export type DesktopOpsErrorCode =
+  | 'no-manager'
+  | 'install-refused'
+  | 'enable-failed'
+  | 'remove-failed'
+  | 'verify-failed'
+  | 'release-age-wait'
+  // 0.10.0：两步升级兜底回装也失败 → 缺席硬错误（details: pkg/previousVersion/addDiagnostic/pendingBuilds?）
+  | 'rollback-failed'
 
 // 0.9.19：等待期失败翻译移入 release-age.ts（describeReleaseAgeFailure）——全量违规解析 +
 // 目标/旁包分述。0.9.10 版只取第一条违规并把旁包名字当成本次目标、给「改用 DSH Web」的
@@ -151,10 +160,14 @@ export interface DesktopInstallDeps {
   listInstalled?: typeof defaultListInstalled
   /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现） */
   appendExternalOperation?: AppendExternalOperation
+  /** 0.10.0 D3 自升级通道注入（SELF_PKG 缝改道用；测试注入 tarball 解析与 intent 读写） */
+  npmTarballUrl?: typeof defaultNpmTarballUrl
+  writeUpgradeIntent?: typeof defaultWriteUpgradeIntent
+  resolveUpgradeIntent?: typeof defaultResolveUpgradeIntent
 }
 
 export type DesktopInstallResult =
-  | (InstallResult & { via: 'desktop-manager'; overridden?: boolean })
+  | (InstallResult & { via: 'desktop-manager'; overridden?: boolean; degraded?: boolean; restoredTo?: string })
   | {
       ok: false
       needsBuildApproval: true
@@ -282,6 +295,32 @@ async function desktopInstallLocked(
     if (gate.notice) releaseAgeNotice = `；${gate.notice}`
   }
 
+  // 0.10.0 R5：install 目标已装（0.2.1 宿主 already-installed 守卫必拦）→ 预查旧版本号，
+  // 使 runManagedInstall 在守卫命中时可静默两步化（remove+add）；全新包（未命中）不注入——
+  // T6 钉零 removeBundle。探测失败 fail-open（守卫命中且无 previousVersion 时走既有失败形态）。
+  let previousVersion: string | undefined
+  if (opts.profileDir) {
+    try {
+      const { items } = await (deps.listInstalled ?? defaultListInstalled)(opts.profileDir)
+      previousVersion = items.find((it) => it.pkg === pkg)?.version
+    } catch {
+      previousVersion = undefined
+    }
+  }
+
+  // 0.10.0 R6（install 臂）：dsh-m 已装态下的 install 调用实为升级（守卫必拦）→ 改道 D3；
+  // 全新安装（未装）走既有单步——守卫不触发，R1「新装路径不动」。
+  if (pkg === SELF_PKG && previousVersion !== undefined) {
+    return desktopSelfUpgradeViaTarballLocked(pkg, previousVersion, { timeoutMs, signal: opts.signal }, {
+      getService: () => service,
+      npmLatest: deps.npmLatest,
+      npmTarballUrl: deps.npmTarballUrl,
+      writeUpgradeIntent: deps.writeUpgradeIntent,
+      resolveUpgradeIntent: deps.resolveUpgradeIntent,
+      listInstalled: deps.listInstalled,
+    })
+  }
+
   let change: DesktopChangeResult
   let bundleName: string
   let registerNote: string | undefined
@@ -289,7 +328,7 @@ async function desktopInstallLocked(
   try {
     managed = await runManagedInstall(
       service,
-      { pkg, spec, version, profileDir: opts.profileDir, approvedBuilds: opts.approvedBuilds, listInstalled: deps.listInstalled },
+      { pkg, spec, version, ...(previousVersion !== undefined ? { previousVersion } : {}), profileDir: opts.profileDir, approvedBuilds: opts.approvedBuilds, listInstalled: deps.listInstalled },
       { governExclude: deps.governExclude, registerExclude: deps.registerExclude, packumentTimes: deps.packumentTimes },
     )
     change = managed.change
@@ -306,6 +345,9 @@ async function desktopInstallLocked(
     throw err
   }
   const retryNote = managed.governRetryNote !== undefined && !governanceNote.includes(managed.governRetryNote) ? managed.governRetryNote : ''
+  const twoStepSuffix = managed.twoStepNote !== undefined ? `；${managed.twoStepNote}` : ''
+  const degradedRestoredTo = managed.degraded === true ? managed.restoredTo : undefined
+  const degradedSuffix = degradedRestoredTo !== undefined ? `；升级失败已回装旧版 ${degradedRestoredTo}（降级恢复）` : ''
 
   return {
     id: entry.id,
@@ -319,9 +361,10 @@ async function desktopInstallLocked(
     ...(compat !== null ? { compat } : {}),
     ...(compatSkipped ? { compatSkipped } : {}),
     needsRestart: true,
-    output: `official pluginManager: application=${change.application ?? 'applied'}, bundle=${bundleName}${change.changed === false ? ', changed=false' : ''}${governanceNote}${retryNote}${releaseAgeNotice}${registerNote ?? ''}`,
+    output: `official pluginManager: application=${change.application ?? 'applied'}, bundle=${bundleName}${change.changed === false ? ', changed=false' : ''}${governanceNote}${retryNote}${releaseAgeNotice}${registerNote ?? ''}${twoStepSuffix}${degradedSuffix}`,
     via: 'desktop-manager',
     ...(change.application === 'overridden' ? { overridden: true } : {}),
+    ...(degradedRestoredTo !== undefined ? { degraded: true, restoredTo: degradedRestoredTo } : {}),
   }
 }
 
@@ -426,13 +469,45 @@ function isGovableFailure(change: DesktopChangeResult): boolean {
   return change.application === 'failed' || change.error !== undefined
 }
 
+/** 官方 pendingBuilds 的鸭子读投影（strings-only）。 */
+function pendingOf(change: DesktopChangeResult): string[] {
+  return Array.isArray(change.pendingBuilds) ? change.pendingBuilds.filter((n) => typeof n === 'string') : []
+}
+
+/** 终态失败（与 runManagedInstall 既有失败闸门同口径）。 */
+function isTerminalFailure(change: DesktopChangeResult): boolean {
+  return change.application === 'failed' || change.application === 'cancelled' || change.error !== undefined
+}
+
+/**
+ * 宿主 0.2.1 already-installed 安装守卫命中（0.10.0，R2）：application=failed +
+ * error.code 精确匹配，且 release-age / build-blocked 形态先于本判定（等待期与审批语义优先）。
+ */
+function isAlreadyInstalledGuard(change: DesktopChangeResult): boolean {
+  if (change.application !== 'failed' || change.error?.code !== 'already-installed') return false
+  if (change.packageResult?.kind === 'build-blocked' && pendingOf(change).length > 0) return false
+  return !/ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION|minimumReleaseAge/i.test(
+    `${change.error?.diagnostic ?? ''}\n${change.error?.code ?? ''}`,
+  )
+}
+
 async function runManagedInstall(
   service: DesktopManagerLike,
   ctx: ManagedInstallCtx,
   deps: ManagedInstallDeps = {},
-): Promise<{ change: DesktopChangeResult; bundleName: string; registerNote?: string; governRetryNote?: string }> {
-  const installOnce = async (): Promise<DesktopChangeResult> =>
-    changeOf(await service.installBundle!(ctx.spec, {
+): Promise<{
+  change: DesktopChangeResult
+  bundleName: string
+  registerNote?: string
+  governRetryNote?: string
+  /** 0.10.0：发生了 already-installed → remove+add 两步化（调用方并入 output 留痕） */
+  twoStepNote?: string
+  /** 0.10.0 R4：降级恢复——升级失败但已自动回装旧版（成功形态 + degraded 标记） */
+  degraded?: boolean
+  restoredTo?: string
+}> {
+  const installOnce = async (spec: string = ctx.spec): Promise<DesktopChangeResult> =>
+    changeOf(await service.installBundle!(spec, {
       enabled: true,
       ...(ctx.approvedBuilds && ctx.approvedBuilds.length > 0 ? { approvedBuilds: ctx.approvedBuilds } : {}),
     }))
@@ -510,6 +585,64 @@ async function runManagedInstall(
       change = await installOnce()
     }
   }
+
+  // 0.10.0（宿主 0.2.1 already-installed 守卫适配，R2/R3）：首腿守卫命中 → 静默两步化
+  // （removeBundle 旧版 → 重试安装同一 spec，至多一次、无循环）；第二腿终态失败 → 兜底回装旧版
+  // （remove 后旧名已不在 manifest，守卫不适用）：回装成功 = 降级恢复结局（degraded，R4）；
+  // cancelled / build-blocked 语义优先（不冒充降级）；回装失败 = 缺席硬错误（rollback-failed）。
+  // 无 previousVersion 不两步化——R3 兜底网的存在前提（无旧版即无回装能力）。
+  let twoStepNote: string | undefined
+  if (isAlreadyInstalledGuard(change) && ctx.previousVersion && typeof service.removeBundle === 'function') {
+    twoStepNote = 'already-installed → two-step'
+    const removeChange = changeOf(await service.removeBundle(ctx.pkg))
+    if (isTerminalFailure(removeChange)) {
+      // remove 腿失败短路（不回装）：旧版尚未移除，状态以官方插件页为准
+      throw new DesktopOpsError(
+        'remove-failed',
+        `两步升级第一步（卸载旧版）失败（${ctx.pkg}；application=${removeChange.application ?? 'failed'}${removeChange.error?.code ? `、error=${removeChange.error.code}` : ''}）：未执行升级，请到官方 Desktop 插件页确认 ${ctx.pkg} 状态`,
+      )
+    }
+    change = await installOnce()
+    if (isTerminalFailure(change)) {
+      const pendingAdd = pendingOf(change)
+      const addDiagnostic = `${change.error?.diagnostic ?? ''}${change.error?.code ? `\n${change.error.code}` : ''}`.trim()
+      const addCancelled = change.application === 'cancelled'
+      const addBuildBlocked = change.packageResult?.kind === 'build-blocked' && pendingAdd.length > 0
+      // 兜底回装旧版（R3）：回装腿失败（含其自身 build-blocked）= 缺席硬错误，降级失败真相优先
+      const rollbackChange = await installOnce(`${ctx.pkg}@${ctx.previousVersion}`)
+      const pendingRollback = pendingOf(rollbackChange)
+      if (isTerminalFailure(rollbackChange) || (rollbackChange.packageResult?.kind === 'build-blocked' && pendingRollback.length > 0)) {
+        throw new DesktopOpsError(
+          'rollback-failed',
+          `升级失败且自动回装旧版也失败（${ctx.pkg}@${ctx.previousVersion}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装 ${ctx.pkg}@${ctx.previousVersion}${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`,
+          {
+            pkg: ctx.pkg,
+            previousVersion: ctx.previousVersion,
+            ...(addDiagnostic !== '' ? { addDiagnostic } : {}),
+            ...(pendingRollback.length > 0 ? { pendingBuilds: pendingRollback } : {}),
+          },
+        )
+      }
+      const verifiedRollback = await verifyAndBundle(rollbackChange)
+      if (addBuildBlocked) {
+        // build-blocked 语义优先：旧版已兜住，仍抛审批请求（不冒充降级成功）
+        throw new DesktopBuildApprovalNeeded(pendingAdd)
+      }
+      if (addCancelled) {
+        // 取消不冒充降级成功：已恢复旧版、未做升级
+        throw new DesktopOpsError('install-refused', `升级已被取消（${ctx.pkg}）：已恢复旧版 ${ctx.previousVersion}，未做升级`)
+      }
+      // 降级恢复（R4）：成功形态 + degraded 标记；跳过挂点2 登记——实际在装的是旧版，登记新版本会是假账
+      return {
+        ...verifiedRollback,
+        ...(governRetryNote !== undefined ? { governRetryNote } : {}),
+        degraded: true,
+        restoredTo: ctx.previousVersion,
+        twoStepNote,
+      }
+    }
+  }
+
   if (change.application === 'failed' || change.application === 'cancelled' || change.error) {
     try {
       await mapFailure(change)
@@ -537,7 +670,11 @@ async function runManagedInstall(
       // fail-open：登记失败不影响安装/升级成功态
     }
   }
-  return { ...verified, ...(registerNote !== undefined || governRetryNote !== undefined ? { registerNote, governRetryNote } : {}) }
+  return {
+    ...verified,
+    ...(registerNote !== undefined || governRetryNote !== undefined ? { registerNote, governRetryNote } : {}),
+    ...(twoStepNote !== undefined ? { twoStepNote } : {}),
+  }
 }
 
 export interface DesktopUninstallDeps extends DesktopEnsureService {
@@ -633,6 +770,10 @@ export interface DesktopUpgradeDeps extends DesktopEnsureService {
   classifyActivation?: (pkg: string, fromVersion: string, toVersion: string) => Promise<ActivationClassification>
   /** 外部操作直落钩子注入（0.9.79 ADR-0018，R3-1；缺省 = 真实现） */
   appendExternalOperation?: AppendExternalOperation
+  /** 0.10.0 D3 自升级通道注入（SELF_PKG 缝改道用；测试注入 tarball 解析与 intent 读写） */
+  npmTarballUrl?: typeof defaultNpmTarballUrl
+  writeUpgradeIntent?: typeof defaultWriteUpgradeIntent
+  resolveUpgradeIntent?: typeof defaultResolveUpgradeIntent
 }
 
 /**
@@ -678,6 +819,111 @@ export async function desktopUpgradeFromRegistry(
   }
 }
 
+/** 0.10.0 R6：自升级专用通道的目标包（core 缝改道唯一判据；host-api/tools/客户端零特判）。 */
+export const SELF_PKG = 'dsh-m'
+
+/** D3 自升级专用通道的可注入依赖（测试；缺省 = 真实现）。 */
+export interface DesktopSelfUpgradeDeps {
+  getService?: () => DesktopManagerLike | undefined
+  ensureService?: (timeoutMs?: number) => Promise<DesktopManagerLike | undefined>
+  npmLatest?: typeof defaultNpmLatest
+  npmTarballUrl?: typeof defaultNpmTarballUrl
+  writeUpgradeIntent?: typeof defaultWriteUpgradeIntent
+  resolveUpgradeIntent?: typeof defaultResolveUpgradeIntent
+  listInstalled?: typeof defaultListInstalled
+}
+
+/**
+ * Desktop 自升级专用通道（0.10.0，R6/R7/D3）：npmLatest 精确版本 → 生效 registry packument 的
+ * dist.tarball → 预写 intent → installBundle(tarballUrl, {enabled:true}) 直覆盖——tarball spec
+ * 的包名在 pnpm 前不可知，不受宿主 0.2.1 already-installed 守卫约束（本机 spike 实证）。
+ * - 恒 panel 语义零外部日志（ADR-0018）：intent 预写落独立 ledger（upgrade-intent.ts），不入 external journal；
+ * - 同版本 → install-refused no-op（T10）；URL 构造失败发生在预写之前 → 零副作用失败（T12）；
+ * - install 终态失败 → 旧版不受影响（spike 实证）+ intent 收口 failed；
+ * - 成功（applied/restart-required/overridden）→ intent 收口 ok + installedVersion；
+ * - promise 悬垂（进程死于活交换）→ intent 保持 delegated，由 self-check 对账收口（崩溃兜底网）。
+ * 导出层自包 withMutationSession（market.ts 同惯例）；core 缝改道发生在宿主 upgrade/install 的
+ * session 之内，直接调 Locked 内层避免嵌套。
+ */
+export async function desktopSelfUpgradeViaTarball(
+  pkgName: string,
+  currentVersion: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+  deps: DesktopSelfUpgradeDeps = {},
+): Promise<DesktopInstallResult & { needsRestart: boolean }> {
+  return withMutationSession(() => desktopSelfUpgradeViaTarballLocked(pkgName, currentVersion, opts, deps))
+}
+
+async function desktopSelfUpgradeViaTarballLocked(
+  pkgName: string,
+  currentVersion: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal },
+  deps: DesktopSelfUpgradeDeps,
+): Promise<DesktopInstallResult & { needsRestart: boolean }> {
+  const service = await resolveManager(deps)
+  if (!service || typeof service.installBundle !== 'function') {
+    throw new DesktopOpsError('no-manager', '官方 pluginManager 服务不可用（desktop profile 的自升级必须由官方管理器执行）；拒绝自升级（fail-closed）')
+  }
+  const timeoutMs = opts.timeoutMs ?? 20_000
+  const latest = await (deps.npmLatest ?? defaultNpmLatest)(pkgName, timeoutMs, opts.signal)
+  if (latest.version === currentVersion) {
+    throw new DesktopOpsError('install-refused', `已是最新版本（${pkgName}@${currentVersion}），无需升级`)
+  }
+  const spec = await (deps.npmTarballUrl ?? defaultNpmTarballUrl)(pkgName, latest.version, timeoutMs, opts.signal)
+  // 预写 intent（崩溃兜底网）：URL 构造失败已在此前抛出，零落盘（T12）
+  await (deps.writeUpgradeIntent ?? defaultWriteUpgradeIntent)({
+    target: pkgName,
+    version: latest.version,
+    ...(currentVersion !== '' ? { fromVersion: currentVersion } : {}),
+    at: Date.now(),
+  })
+  const resolveIntent = deps.resolveUpgradeIntent ?? defaultResolveUpgradeIntent
+  try {
+    const change = changeOf(await service.installBundle(spec, { enabled: true }))
+    if (isTerminalFailure(change)) {
+      const pending = pendingOf(change)
+      if (change.application === 'cancelled') {
+        throw new DesktopOpsError('install-refused', `自升级已被取消（${pkgName}）：当前版本 ${currentVersion} 不受影响`)
+      }
+      if (change.packageResult?.kind === 'build-blocked' && pending.length > 0) {
+        throw new DesktopBuildApprovalNeeded(pending)
+      }
+      throw new DesktopOpsError('install-refused', `自升级失败（${pkgName}@${latest.version}；application=${change.application ?? 'failed'}${change.error?.code ? `、error=${change.error.code}` : ''}）：当前版本 ${currentVersion} 不受影响，可稍后重试`)
+    }
+    const bundleName = change.bundle ?? pkgName
+    if (typeof service.listBundles === 'function') {
+      const bundles = await service.listBundles()
+      const found = (bundles ?? []).find((b) => b && b.name === bundleName)
+      if (!found || found.installed === false) {
+        throw new DesktopOpsError('verify-failed', `自升级复读失败（${pkgName}）：官方结果为 ${change.application ?? 'unknown'} 但 listBundles 未見目标 bundle 在装——不冒充升级成功`)
+      }
+    }
+    await resolveIntent({ ok: true, installedVersion: latest.version })
+    return {
+      id: pkgName,
+      pkg: pkgName,
+      spec,
+      version: latest.version,
+      buildApprovals: Array.isArray(change.approvedBuilds) ? change.approvedBuilds : [],
+      fallbackAllBuilds: false,
+      // R10 忠实透传宿主 application：restart-required → true；applied/overridden → false
+      needsRestart: change.application === 'restart-required',
+      output: `official pluginManager (self-upgrade via tarball): application=${change.application ?? 'applied'}, bundle=${bundleName}`,
+      via: 'desktop-manager',
+      ...(change.application === 'overridden' ? { overridden: true } : {}),
+    }
+  } catch (err) {
+    // 未竟路径统一收口 intent 为 failed（成功臂已 resolve 时幂等 no-op）；
+    // 收口失败不遮蔽原始错误——delegated 残留由 self-check 对账兜底。
+    try {
+      await resolveIntent({ ok: false })
+    } catch {
+      /* 对账兜底仍在 */
+    }
+    throw err
+  }
+}
+
 async function desktopUpgradeLocked(
   pkg: string,
   cfg: RegistryConfig,
@@ -689,6 +935,22 @@ async function desktopUpgradeLocked(
     throw new DesktopOpsError('no-manager', '官方 pluginManager 服务不可用（desktop profile 的升级必须由官方管理器执行覆盖安装）；拒绝升级（fail-closed）')
   }
   const timeoutMs = cfg.timeoutMs ?? 20_000
+  // 0.10.0 R6 自升级通道分治（唯一改道点）：desktop 上「升级 dsh-m 自身」一律 D3 tarball 直覆盖——
+  // remove+add 对调用者自身是破坏性路径，绝不落入通用两步；host-api `case 'upgrade'`、tools
+  // `dshm_upgrade` 与一切经 core 的入口在此自动获得同语义（客户端与工具层零特判）。
+  if (pkg === SELF_PKG) {
+    const { items } = await (deps.listInstalled ?? defaultListInstalled)(opts.profileDir)
+    const selfTarget = items.find((it) => it.pkg === pkg)
+    if (!selfTarget) throw new DesktopOpsError('install-refused', `desktop profile 未安装该插件: ${pkg}（升级目标必须是已装插件）`)
+    return desktopSelfUpgradeViaTarballLocked(pkg, selfTarget.version, { timeoutMs, signal: opts.signal }, {
+      getService: () => service,
+      npmLatest: deps.npmLatest,
+      npmTarballUrl: deps.npmTarballUrl,
+      writeUpgradeIntent: deps.writeUpgradeIntent,
+      resolveUpgradeIntent: deps.resolveUpgradeIntent,
+      listInstalled: deps.listInstalled,
+    })
+  }
   const loaded = await (deps.loadRegistry ?? defaultLoadRegistry)(cfg, { namespace: opts.namespace ?? 'host', profile: opts.profile })
   if (loaded.status === 'unavailable') {
     throw new DesktopOpsError('install-refused', `收录清单不可用，无法升级 ${pkg}；请检查 registry 配置或网络后重试`)
@@ -802,6 +1064,9 @@ async function desktopUpgradeLocked(
     throw err
   }
   const retryNote = managed.governRetryNote !== undefined && !governanceNote.includes(managed.governRetryNote) ? managed.governRetryNote : ''
+  const twoStepSuffix = managed.twoStepNote !== undefined ? `；${managed.twoStepNote}` : ''
+  const degradedRestoredTo = managed.degraded === true ? managed.restoredTo : undefined
+  const degradedSuffix = degradedRestoredTo !== undefined ? `；升级失败已回装旧版 ${degradedRestoredTo}（降级恢复）` : ''
 
   // 0.9.22 生效判定：npm 源升级在成功点分类；任何异常 fail-open 到 unknown，绝不影响升级成功态
   let activation: ActivationClassification | undefined
@@ -827,9 +1092,10 @@ async function desktopUpgradeLocked(
     ...(compat !== null ? { compat } : {}),
     ...(compatSkipped ? { compatSkipped } : {}),
     needsRestart,
-    output: `official pluginManager: application=${change.application ?? 'applied'}, bundle=${bundleName}${change.changed === false ? ', changed=false' : ''}${governanceNote}${retryNote}${releaseAgeNotice}${registerNote ?? ''}`,
+    output: `official pluginManager: application=${change.application ?? 'applied'}, bundle=${bundleName}${change.changed === false ? ', changed=false' : ''}${governanceNote}${retryNote}${releaseAgeNotice}${registerNote ?? ''}${twoStepSuffix}${degradedSuffix}`,
     via: 'desktop-manager',
     ...(change.application === 'overridden' ? { overridden: true } : {}),
+    ...(degradedRestoredTo !== undefined ? { degraded: true, restoredTo: degradedRestoredTo } : {}),
     fromVersion: target.version,
     ...(activation ? { activation } : {}),
   }

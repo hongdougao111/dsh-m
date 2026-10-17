@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { createApiDispatcher } from '../lib/core/host-api.js'
 import { createRegistryController } from '../lib/core/registry-controller.js'
 import { TransactionError } from '../lib/core/profile-transaction.js'
+import { readUpgradeIntent, resolveUpgradeIntent, writeUpgradeIntent } from '../lib/core/upgrade-intent.js'
 
 const ORIGIN = 'http://127.0.0.1:3080'
 const JSON_HEADERS = { 'content-type': 'application/json', origin: ORIGIN, host: '127.0.0.1:3080' }
@@ -149,10 +150,13 @@ beforeEach(() => {
   process.env.DSHM_CACHE_DIR = cacheRoot
   // 0.9.79：mutation 用例可能落真实实现的外部操作日志——隔离 journal，不触碰真实 ~/.dsh
   process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(cacheRoot, 'external-operations.json')
+  // 0.10.0：开机对账用例走真实 intent ledger——隔离，不触碰真实 ~/.dsh
+  process.env.DSHM_UPGRADE_INTENT_FILE = join(cacheRoot, 'self-upgrade-intent.json')
 })
 afterEach(() => {
   delete process.env.DSHM_CACHE_DIR
   delete process.env.DSHM_EXTERNAL_JOURNAL_FILE
+  delete process.env.DSHM_UPGRADE_INTENT_FILE
   if (cacheRoot) rmSync(cacheRoot, { recursive: true, force: true })
 })
 
@@ -573,6 +577,42 @@ describe('host-api：method 响应', () => {
     assert.equal(res.body.latest, '9.9.9')
     assert.equal(res.body.outdated, true)
     assert.deepEqual(calls.npm, ['dsh-m'])
+  })
+
+  it('0.10.0 开机对账②：悬垂 intent 版本相符 → intentResolved.ok=true 且文件转 resolved；再查幂等零透出', async () => {
+    await writeUpgradeIntent({ target: 'dsh-m', version: '0.0.0-test', fromVersion: '0.9.94', at: 1_000 })
+    const { dispatcher } = setup({
+      readUpgradeIntent: readUpgradeIntent,
+      resolveUpgradeIntent: resolveUpgradeIntent,
+    })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'self-check' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.intentResolved?.ok, true)
+    assert.equal(res.body.intentResolved?.target, 'dsh-m')
+    assert.equal(res.body.intentResolved?.installedVersion, '0.0.0-test')
+    const rec = await readUpgradeIntent()
+    assert.equal(rec?.status, 'resolved')
+    assert.equal(rec?.outcome, 'ok')
+    // memoize：同 dispatcher（= 同进程）第二次 self-check 不再透出对账结果
+    const res2 = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'self-check' } })
+    assert.equal(res2.status, 200)
+    assert.equal(res2.body.intentResolved, undefined)
+  })
+
+  it('0.10.0 开机对账③：悬垂 intent 版本不符（0.9.94 vs 进程 0.0.0-test）→ intentResolved.ok=false 且 outcome=failed', async () => {
+    await writeUpgradeIntent({ target: 'dsh-m', version: '0.9.94', at: 1_000 })
+    const { dispatcher } = setup({
+      readUpgradeIntent: readUpgradeIntent,
+      resolveUpgradeIntent: resolveUpgradeIntent,
+    })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'self-check' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.intentResolved?.ok, false)
+    assert.equal(res.body.intentResolved?.target, 'dsh-m')
+    assert.equal(res.body.intentResolved?.installedVersion, undefined)
+    const rec = await readUpgradeIntent()
+    assert.equal(rec?.status, 'resolved')
+    assert.equal(rec?.outcome, 'failed')
   })
 
   it('未预期异常 → 500 且不泄露堆栈', async () => {

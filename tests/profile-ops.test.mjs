@@ -14,10 +14,12 @@ import {
   desktopToggle,
   desktopUninstall,
   desktopUpgradeFromRegistry,
+  desktopSelfUpgradeViaTarball,
   DesktopOpsError,
   _setEnableRetryDelayForTests,
 } from '../lib/core/profile-ops.js'
 import { _resetReleaseAgeCachesForTests } from '../lib/core/release-age.js'
+import { readUpgradeIntent } from '../lib/core/upgrade-intent.js'
 import { ToggleError } from '../lib/core/toggle.js'
 import { IncompatibleError } from '../lib/core/compat-check.js'
 import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
@@ -26,6 +28,8 @@ beforeEach(() => _resetMergedMarketForTests())
 
 // 0.9.79：desktop 入口自记外部操作日志（'external' 兜底）——隔离 journal（同 cacheRoot 纪律）
 process.env.DSHM_EXTERNAL_JOURNAL_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-journal-')), 'external-operations.json')
+// 0.10.0：自升级 intent ledger 同款隔离（D3/T17 钉例走真实 writeUpgradeIntent 时绝不碰真机 $DSH_HOME）
+process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
 
 const ENTRY = {
   id: 'plug-a',
@@ -442,6 +446,273 @@ describe('desktopUpgradeFromRegistry：覆盖安装（dsh-market 同策略）', 
       () => desktopUpgradeFromRegistry('pkg-a', {}, {}, upgradeDeps(undefined, { deps: { ensureService: async () => undefined } })),
       (err) => err instanceof DesktopOpsError && err.code === 'no-manager',
     )
+  })
+})
+
+// ---------- 0.10.0 Task 3：宿主 0.2.1 already-installed 守卫适配（两步化 + 兜底回装 + 降级恢复） ----------
+
+describe('desktopUpgradeFromRegistry：already-installed 两步化 + 兜底回装 + 降级恢复（0.10.0）', () => {
+  function twoStepDeps(service, overrides = {}) {
+    return {
+      getService: () => service,
+      loadRegistry: async () => registryWith([ENTRY]),
+      listInstalled: async () => ({ items: overrides.installed ?? [{ pkg: 'pkg-a', name: 'Plug A', version: '0.9.0' }] }),
+      npmLatest: async () => ({ version: '1.2.3', integrity: 'sha512-x' }),
+      precheck: async () => null,
+      classifyActivation: async () => 'unknown',
+    }
+  }
+  const GUARD_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'already-installed' } }
+  const ADD_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'operation-error' }, packageResult: { exitCode: 1 } }
+  const OK = { changed: true, application: 'applied', stage: 'install', bundle: 'pkg-a', packageResult: { exitCode: 0 } }
+
+  it('T2：首腿 already-installed → remove+重试（installBundle 2 次同 spec）→ 成功且 output 含 two-step', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      return calls.installBundle.length === 1 ? { ...GUARD_FAIL } : { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service, { installed: [{ pkg: 'pkg-a', name: 'Plug A', version: '1.0.0' }] }))
+    assert.deepEqual(calls.removeBundle, ['pkg-a'], '恰好卸载旧版一次')
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3'], '第二腿仍装新 spec')
+    assert.match(res.output, /two-step/)
+  })
+
+  it('T3：第二腿失败 → 兜底回装旧版 0.9.0 → degraded=true + restoredTo=0.9.0', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      return { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'], '第三腿=旧版 spec（回装）')
+    assert.deepEqual(calls.removeBundle, ['pkg-a'])
+    assert.equal(res.degraded, true)
+    assert.equal(res.restoredTo, '0.9.0')
+  })
+
+  it('T4：回装也失败 → rejects rollback-failed（缺席硬错误）', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      return { ...ADD_FAIL, error: { code: 'rollback-boom' } }
+    } })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service)),
+      (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed',
+    )
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'])
+  })
+
+  it('T5：remove 腿失败（bundle-in-use）→ remove-failed 短路且零回装（installBundle 恰 1 次）', async () => {
+    const { service, calls } = managerStub({
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...GUARD_FAIL }
+      },
+      removeBundle: async (name) => {
+        calls.removeBundle.push(name)
+        return { changed: false, application: 'failed', stage: 'remove', bundle: name, error: { code: 'bundle-in-use' } }
+      },
+    })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service)),
+      (err) => err instanceof DesktopOpsError && err.code === 'remove-failed',
+    )
+    assert.equal(calls.installBundle.length, 1, 'remove 失败不回装不重试')
+    assert.deepEqual(calls.removeBundle, ['pkg-a'])
+  })
+
+  it('T8：第二腿 cancelled → 兜底回装旧版成功 → rejects install-refused 且文案含「已恢复旧版 0.9.0」「未做升级」', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { changed: false, application: 'cancelled', stage: 'install' }
+      return { ...OK }
+    } })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service)),
+      (err) => err instanceof DesktopOpsError && err.code === 'install-refused'
+        && err.message.includes('已恢复旧版 0.9.0') && err.message.includes('未做升级'),
+    )
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'], '取消腿同样兜底回装')
+  })
+
+  it('T9：第二腿 build-blocked → 先回装旧版，再经既有映射给结构化 needsBuildApproval（审批语义优先，公开入口不抛）', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { changed: false, application: 'failed', stage: 'install', packageResult: { kind: 'build-blocked' }, pendingBuilds: ['pkg-a'] }
+      return { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service))
+    assert.equal(res.ok, false)
+    assert.equal(res.needsBuildApproval, true)
+    assert.deepEqual(res.pendingBuilds, ['pkg-a'])
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'], '回装已兜住旧版')
+  })
+
+  it('T9b：回装腿自身 build-blocked → rejects rollback-failed 且 details.pendingBuilds 非空（降级失败真相优先）', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      return { changed: false, application: 'failed', stage: 'install', packageResult: { kind: 'build-blocked' }, pendingBuilds: ['pkg-a'] }
+    } })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service)),
+      (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed'
+        && Array.isArray(err.details?.pendingBuilds) && err.details.pendingBuilds.length > 0,
+    )
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'])
+  })
+})
+
+// ---------- 0.10.0 Task 5：install 路径静默两步化（R5）+ 全新安装单步回归（R1×R5 张力的 T6 消解钉） ----------
+
+describe('desktopInstallFromRegistry：install 路径静默两步化 + 全新安装单步回归（0.10.0）', () => {
+  const OK = { changed: true, application: 'applied', stage: 'install', bundle: 'pkg-a', packageResult: { exitCode: 0 } }
+  const GUARD_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'already-installed' } }
+  /** 全离线桩：等待期预检/治理/登记全部注入 no-op，profileDir 仅用于 previousVersion 探测。 */
+  function offlineDeps(service, overrides = {}) {
+    return depsFor(service, {
+      packumentTimes: async () => ({}),
+      workspacePolicy: async () => ({ explicitAge: false, minimumReleaseAgeMin: null, strict: false, excludes: [] }),
+      governExclude: async () => ({ changed: false }),
+      registerExclude: async () => ({ applied: false }),
+      ...overrides,
+    })
+  }
+
+  it('T6：全新安装（listInstalled 空）→ removeBundle 恒零调用（单步语义不回归）', async () => {
+    const { service, calls } = managerStub()
+    const res = await desktopInstallFromRegistry('plug-a', {}, { profileDir: 'X:/profile-t6' }, offlineDeps(service, {
+      listInstalled: async () => ({ items: [], others: [], complete: true }),
+    }))
+    assert.deepEqual(calls.removeBundle, [], '全新安装零 removeBundle')
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3'])
+    assert.equal(res.via, 'desktop-manager')
+  })
+
+  it('T7：目标已装（pkg-a@0.5.0）且首腿 already-installed → 静默两步化，output 含 already-installed → two-step', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      return calls.installBundle.length === 1 ? { ...GUARD_FAIL } : { ...OK }
+    } })
+    const res = await desktopInstallFromRegistry('plug-a', {}, { profileDir: 'X:/profile-t7' }, offlineDeps(service, {
+      listInstalled: async () => ({ items: [{ pkg: 'pkg-a', name: 'Plug A', version: '0.5.0', spec: '0.5.0' }], others: [], complete: true }),
+    }))
+    assert.deepEqual(calls.removeBundle, ['pkg-a'], '守卫命中 → 卸载旧版一次')
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3'], '第二腿仍装新 spec')
+    assert.match(res.output, /already-installed → two-step/)
+  })
+})
+
+// ---------- 0.10.0 Task 7：D3 自升级专用通道（tarball 直覆盖）+ SELF_PKG core 缝改道 ----------
+
+describe('desktopSelfUpgradeViaTarball：D3 tarball 直覆盖（0.10.0）', () => {
+  function d3Deps(service, overrides = {}) {
+    return {
+      getService: () => service,
+      npmLatest: overrides.npmLatest ?? (async () => ({ version: '2.0.0', integrity: 'sha512-x', tarball: 'https://example.com/dsh-m-2.0.0.tgz' })),
+      npmTarballUrl: overrides.npmTarballUrl ?? (async () => 'https://example.com/dsh-m-2.0.0.tgz'),
+      listInstalled: overrides.listInstalled,
+    }
+  }
+  const D3_OK = { changed: true, application: 'restart-required', stage: 'install', bundle: 'dsh-m', packageResult: { exitCode: 0 } }
+  /** 每钉独立 intent 文件（同文件内共享模块 env；防跨钉残留串扰）。 */
+  const freshIntentFile = () => {
+    process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
+  }
+
+  it('T10：同版本 → install-refused no-op，零 installBundle、零 intent 落盘', async () => {
+    freshIntentFile()
+    const { service, calls } = managerStub({ bundles: [{ name: 'dsh-m', installed: true, enabled: true }] })
+    await assert.rejects(
+      () => desktopSelfUpgradeViaTarball('dsh-m', '2.0.0', {}, d3Deps(service)),
+      (err) => err instanceof DesktopOpsError && err.code === 'install-refused' && /已是最新|无需升级/.test(err.message),
+    )
+    assert.equal(calls.installBundle.length, 0)
+    assert.equal(await readUpgradeIntent(), undefined)
+  })
+
+  it('T11：精确版本 → tarball URL + enabled:true 直覆盖 → needsRestart 透传 + intent 落 delegated 后就地 resolve ok', async () => {
+    freshIntentFile()
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...D3_OK }
+      },
+    })
+    const res = await desktopSelfUpgradeViaTarball('dsh-m', '0.9.94', {}, d3Deps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['https://example.com/dsh-m-2.0.0.tgz'])
+    assert.equal(calls.installBundle[0].options?.enabled, true)
+    assert.equal(res.needsRestart, true, 'restart-required 忠实透传（R10）')
+    assert.equal(res.version, '2.0.0')
+    const intent = await readUpgradeIntent()
+    assert.equal(intent?.status, 'resolved')
+    assert.equal(intent?.outcome, 'ok')
+    assert.equal(intent?.installedVersion, '2.0.0')
+    assert.equal(intent?.fromVersion, '0.9.94')
+  })
+
+  it('T12：npmTarballUrl 抛错 → rejects 且零 installBundle、零 intent 残留（写入前失败不落盘）', async () => {
+    freshIntentFile()
+    const { service, calls } = managerStub({ bundles: [{ name: 'dsh-m', installed: true, enabled: true }] })
+    await assert.rejects(
+      () => desktopSelfUpgradeViaTarball('dsh-m', '0.9.94', {}, d3Deps(service, {
+        npmTarballUrl: async () => { throw new Error('packument boom') },
+      })),
+      /packument boom/,
+    )
+    assert.equal(calls.installBundle.length, 0)
+    assert.equal(await readUpgradeIntent(), undefined)
+  })
+})
+
+describe('SELF_PKG core 缝改道：desktopUpgrade/desktopInstall(dsh-m) 一律 D3（0.10.0 T17）', () => {
+  const DSH_M_ENTRY = { ...ENTRY, id: 'dsh-m', name: 'dsh-m', npm: 'dsh-m' }
+  const D3_OK = { changed: true, application: 'restart-required', stage: 'install', bundle: 'dsh-m', packageResult: { exitCode: 0 } }
+  function seamDeps(service, overrides = {}) {
+    return {
+      getService: () => service,
+      loadRegistry: async () => registryWith([DSH_M_ENTRY]),
+      listInstalled: async () => ({ items: overrides.installed ?? [{ pkg: 'dsh-m', name: 'dsh-m', version: '0.9.94' }], others: [], complete: true }),
+      npmLatest: async () => ({ version: '0.10.0', integrity: 'sha512-x' }),
+      npmTarballUrl: async () => 'https://example.com/dsh-m-0.10.0.tgz',
+      precheck: async () => null,
+      classifyActivation: async () => 'unknown',
+      packumentTimes: async () => ({}),
+      workspacePolicy: async () => ({ explicitAge: false, minimumReleaseAgeMin: null, strict: false, excludes: [] }),
+    }
+  }
+  it('T17a：desktopUpgradeFromRegistry(dsh-m) → installBundle 恰一次收 tarball URL，removeBundle 零调用（绝不两步）', async () => {
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...D3_OK }
+      },
+    })
+    const res = await desktopUpgradeFromRegistry('dsh-m', {}, {}, seamDeps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['https://example.com/dsh-m-0.10.0.tgz'])
+    assert.deepEqual(calls.removeBundle, [], '自升级绝不走 remove+add')
+    assert.equal(res.needsRestart, true)
+  })
+
+  it('T17b：desktopInstallFromRegistry(dsh-m, 已装态) → 同样改道 D3', async () => {
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...D3_OK }
+      },
+    })
+    const res = await desktopInstallFromRegistry('dsh-m', {}, { profileDir: 'X:/profile-t17' }, seamDeps(service))
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['https://example.com/dsh-m-0.10.0.tgz'])
+    assert.deepEqual(calls.removeBundle, [], '自升级绝不走 remove+add')
+    assert.equal(res.needsRestart, true)
   })
 })
 

@@ -14,6 +14,7 @@ import { isExactVersion } from './packument.js'
 
 export {
   npmVersion,
+  npmTarballUrl,
   npmPackument,
   npmPackumentReadme,
   npmLatest,

@@ -22,6 +22,7 @@ import {
   npmLatest,
   npmPackument,
   npmVersion,
+  npmTarballUrl,
 } from '../lib/core/packument.js'
 import { resetNpmRouteForTests } from '../lib/core/npm-route.js'
 
@@ -277,5 +278,29 @@ describe('搬迁函数回归（签名形状锚）', () => {
     const r = await npmPackumentReadme('x', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn })
     assert.equal(r.readme, 'explicit-readme')
     assert.ok(w.log.every((u) => u.startsWith('https://r.example')), '显式 registry 直取')
+  })
+})
+
+describe('npmTarballUrl（0.10.0 Task 2：D3 自升级通道取精确版本 tarball URL）', () => {
+  it('①正常：返回该版本 dist.tarball（薄封装 npmVersion 阶梯）', async () => {
+    const w = stubWire({
+      other: () => ({ version: '1.2.3', dist: { integrity: 'sha512-x', tarball: 'https://t/x-1.2.3.tgz' } }),
+    })
+    const url = await npmTarballUrl('x', '1.2.3', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn })
+    assert.equal(url, 'https://t/x-1.2.3.tgz')
+  })
+  it('②响应缺 dist.tarball → 可读错误「<pkg>@<version> packument 缺 dist.tarball」', async () => {
+    const w = stubWire({ other: () => ({ version: '1.2.3', dist: { integrity: 'sha512-x' } }) })
+    await assert.rejects(
+      () => npmTarballUrl('x', '1.2.3', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn }),
+      /x@1\.2\.3 packument 缺 dist\.tarball/,
+    )
+  })
+  it('③版本不存在 → 错误上抛（npmVersion 阶梯终末失败原样透传）', async () => {
+    const w = stubWire({ other: { throw: '404 version not found' }, npmjs: { throw: '404 version not found' } })
+    await assert.rejects(
+      () => npmTarballUrl('x', '9.9.9', 20_000, undefined, 'https://r.example', { fetchJsonLimited: w.fn }),
+      /404 version not found/,
+    )
   })
 })

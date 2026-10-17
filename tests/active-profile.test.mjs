@@ -107,6 +107,13 @@ describe('assertWriteAllowed：能力表全矩阵', () => {
     }
   })
 
+  it('0.10.0 Task 8：self-upgrade 指引不再指向 DSH Web，改指官方 Settings → Plugins remove + install（精确版本）', () => {
+    const g = WRITE_GUIDANCE['self-upgrade']
+    assert.ok(g.includes('Settings → Plugins'), '应含官方 Settings → Plugins 入口')
+    assert.ok(g.includes('remove + install'), '应给出官方插件页 remove + install（精确版本）操作')
+    assert.ok(!g.includes('DSH Web'), '不得再让用户「回 DSH Web」（desktop 形态失配指引，R7 顺带修复）')
+  })
+
   it('unknown：全部拒绝', () => {
     for (const action of ACTIONS) {
       let caught = null
