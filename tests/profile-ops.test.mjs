@@ -726,6 +726,78 @@ describe('enable 竞速重试普适化 + 回装失败账实复读（0.10.1，真
     assert.equal(res.needsRestart, true)
     assert.equal((await readUpgradeIntent())?.status, 'resolved')
   })
+
+  // ---------- 0.10.1（E2E 实证 ③）：install 路径守卫命中一律两步化（去掉 previousVersion 前置门） ----------
+  // 真机事件：卸载 → 同会话重装，宿主活跃态仍视其在装（守卫命中），而 previousVersion 探测口径为「未安装」
+  // → 0.10.0 原样透传 already-installed。修法：守卫命中即 remove+add（官方语义），无旧版时失败走账实复读。
+
+  describe('install 路径守卫命中一律两步化（0.10.1 ③）', () => {
+    const GUARD_FAIL_2 = { changed: false, application: 'failed', stage: 'install', error: { code: 'already-installed' } }
+    const ADD_FAIL_2 = { changed: false, application: 'failed', stage: 'install', error: { code: 'operation-error' }, packageResult: { exitCode: 1 } }
+    const OK_2 = { changed: true, application: 'applied', stage: 'install', bundle: 'pkg-a', packageResult: { exitCode: 0 } }
+    function freshDeps(service, listInstalled) {
+      return {
+        getService: () => service,
+        resolveEntry: async () => ENTRY,
+        npmLatest: async () => ({ version: '1.2.3', integrity: 'sha512-x' }),
+        precheck: async () => null,
+        packumentTimes: async () => ({}),
+        workspacePolicy: async () => ({ explicitAge: false, minimumReleaseAgeMin: null, strict: false, excludes: [] }),
+        governExclude: async () => ({ changed: false }),
+        registerExclude: async () => ({ applied: false }),
+        listInstalled,
+      }
+    }
+
+    it('T-C1：全新安装（listInstalled 空）守卫命中 → 仍两步化 → 成功且 output 含 two-step', async () => {
+      const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return calls.installBundle.length === 1 ? { ...GUARD_FAIL_2 } : { ...OK_2 }
+      } })
+      const res = await desktopInstallFromRegistry('plug-a', {}, { profileDir: 'X:/profile-tc1' }, freshDeps(service, async () => ({ items: [], others: [], complete: true })))
+      assert.deepEqual(calls.removeBundle, ['pkg-a'], '守卫命中即 remove（宿主说在装，remove 就是官方语义）')
+      assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3'])
+      assert.match(res.output, /already-installed → two-step/)
+    })
+
+    it('T-C2：无旧版可回装且第二腿失败 → 按账实复读给恢复指引（缺席形态）', async () => {
+      const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        if (calls.installBundle.length === 1) return { ...GUARD_FAIL_2 }
+        return { ...ADD_FAIL_2 }
+      } })
+      await assert.rejects(
+        () => desktopInstallFromRegistry('plug-a', {}, { profileDir: 'X:/profile-tc2' }, freshDeps(service, async () => ({ items: [], others: [], complete: true }))),
+        (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed'
+          && err.message.includes('可能缺席')
+          && err.details?.installedVersion === undefined,
+      )
+      assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3'])
+    })
+
+    it('T-C3：无旧版可回装、第二腿失败但账面已有版本（卸载窗口实况复刻）→ 「已写入 + 重启激活」', async () => {
+      const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        if (calls.installBundle.length === 1) return { ...GUARD_FAIL_2 }
+        return { ...ADD_FAIL_2 }
+      } })
+      let liCalls = 0
+      const deps = freshDeps(service, async () => {
+        liCalls += 1
+        // 首查（previousVersion 探测）= 空（卸载窗口的探测口径）；回装失败复读 = 0.4.1 已写入（账实）
+        return liCalls === 1
+          ? { items: [], others: [], complete: true }
+          : { items: [{ pkg: 'pkg-a', name: 'Plug A', version: '0.4.1', spec: '0.4.1' }], others: [], complete: true }
+      })
+      await assert.rejects(
+        () => desktopInstallFromRegistry('plug-a', {}, { profileDir: 'X:/profile-tc3' }, deps),
+        (err) => err instanceof DesktopOpsError && err.code === 'rollback-failed'
+          && err.message.includes('已写入')
+          && err.message.includes('重启')
+          && err.details?.installedVersion === '0.4.1',
+      )
+    })
+  })
 })
 
 // ---------- 0.10.0 Task 7：D3 自升级专用通道（tarball 直覆盖）+ SELF_PKG core 缝改道 ----------

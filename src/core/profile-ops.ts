@@ -599,9 +599,11 @@ async function runManagedInstall(
   // （removeBundle 旧版 → 重试安装同一 spec，至多一次、无循环）；第二腿终态失败 → 兜底回装旧版
   // （remove 后旧名已不在 manifest，守卫不适用）：回装成功 = 降级恢复结局（degraded，R4）；
   // cancelled / build-blocked 语义优先（不冒充降级）；回装失败 = 缺席硬错误（rollback-failed）。
-  // 无 previousVersion 不两步化——R3 兜底网的存在前提（无旧版即无回装能力）。
+  // 0.10.1（E2E 实证 ③）：去掉 previousVersion 前置门——卸载后同会话重装时，宿主活跃态/manifest
+  // 字面仍视其在装（守卫命中），而探测口径为「未安装」；守卫命中即 remove+add（官方语义），
+  // 无旧版可回装时失败走账实复读给恢复指引。
   let twoStepNote: string | undefined
-  if (isAlreadyInstalledGuard(change) && ctx.previousVersion && typeof service.removeBundle === 'function') {
+  if (isAlreadyInstalledGuard(change) && typeof service.removeBundle === 'function') {
     twoStepNote = 'already-installed → two-step'
     const removeChange = changeOf(await service.removeBundle(ctx.pkg))
     if (isTerminalFailure(removeChange)) {
@@ -617,53 +619,85 @@ async function runManagedInstall(
       const addDiagnostic = `${change.error?.diagnostic ?? ''}${change.error?.code ? `\n${change.error.code}` : ''}`.trim()
       const addCancelled = change.application === 'cancelled'
       const addBuildBlocked = change.packageResult?.kind === 'build-blocked' && pendingAdd.length > 0
-      // 兜底回装旧版（R3）：回装腿失败（含其自身 build-blocked）= 缺席硬错误，降级失败真相优先
-      const rollbackChange = await installOnceRetryingEnable(`${ctx.pkg}@${ctx.previousVersion}`)
-      const pendingRollback = pendingOf(rollbackChange)
-      if (isTerminalFailure(rollbackChange) || (rollbackChange.packageResult?.kind === 'build-blocked' && pendingRollback.length > 0)) {
-        // 0.10.1（E2E 实证，skip-auth@0.4.1 事件）：回装腿失败 ≠ 一定缺席——pnpm 可能已写入账面
-        // （激活阶段失败）。宣称缺席前实读账面，按实况分派恢复指引（账实相符优先，零误导性降级建议）。
-        let installedVersion: string | undefined
-        if (ctx.profileDir && ctx.listInstalled) {
-          try {
-            const row = (await ctx.listInstalled(ctx.profileDir)).items.find((it) => it.pkg === ctx.pkg)
-            installedVersion = row?.version
-          } catch {
-            // 复读失败按未知处理：保留既有缺席文案（含「可能」字样，不断言）
+      if (ctx.previousVersion) {
+        // 兜底回装旧版（R3）：回装腿失败（含其自身 build-blocked）= 缺席硬错误，降级失败真相优先
+        const rollbackChange = await installOnceRetryingEnable(`${ctx.pkg}@${ctx.previousVersion}`)
+        const pendingRollback = pendingOf(rollbackChange)
+        if (isTerminalFailure(rollbackChange) || (rollbackChange.packageResult?.kind === 'build-blocked' && pendingRollback.length > 0)) {
+          // 0.10.1（E2E 实证，skip-auth@0.4.1 事件）：回装腿失败 ≠ 一定缺席——pnpm 可能已写入账面
+          // （激活阶段失败）。宣称缺席前实读账面，按实况分派恢复指引（账实相符优先，零误导性降级建议）。
+          let installedVersion: string | undefined
+          if (ctx.profileDir && ctx.listInstalled) {
+            try {
+              const row = (await ctx.listInstalled(ctx.profileDir)).items.find((it) => it.pkg === ctx.pkg)
+              installedVersion = row?.version
+            } catch {
+              // 复读失败按未知处理：保留既有缺席文案（含「可能」字样，不断言）
+            }
           }
+          const message = installedVersion !== undefined
+            ? `升级失败且自动回装未完成，但账面显示 ${ctx.pkg}@${installedVersion} 已写入（激活阶段可能未完成）：请重启 Desktop 完成激活；如重启后仍异常，请在官方 Desktop 插件页手动处理${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
+            : `升级失败且自动回装旧版也失败（${ctx.pkg}@${ctx.previousVersion}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装 ${ctx.pkg}@${ctx.previousVersion}${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
+          throw new DesktopOpsError(
+            'rollback-failed',
+            message,
+            {
+              pkg: ctx.pkg,
+              previousVersion: ctx.previousVersion,
+              ...(addDiagnostic !== '' ? { addDiagnostic } : {}),
+              ...(pendingRollback.length > 0 ? { pendingBuilds: pendingRollback } : {}),
+              ...(installedVersion !== undefined ? { installedVersion } : {}),
+            },
+          )
         }
-        const message = installedVersion !== undefined
-          ? `升级失败且自动回装未完成，但账面显示 ${ctx.pkg}@${installedVersion} 已写入（激活阶段可能未完成）：请重启 Desktop 完成激活；如重启后仍异常，请在官方 Desktop 插件页手动处理${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
-          : `升级失败且自动回装旧版也失败（${ctx.pkg}@${ctx.previousVersion}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装 ${ctx.pkg}@${ctx.previousVersion}${addDiagnostic !== '' ? `；升级失败原因：${addDiagnostic}` : ''}`
-        throw new DesktopOpsError(
-          'rollback-failed',
-          message,
-          {
-            pkg: ctx.pkg,
-            previousVersion: ctx.previousVersion,
-            ...(addDiagnostic !== '' ? { addDiagnostic } : {}),
-            ...(pendingRollback.length > 0 ? { pendingBuilds: pendingRollback } : {}),
-            ...(installedVersion !== undefined ? { installedVersion } : {}),
-          },
-        )
+        const verifiedRollback = await verifyAndBundle(rollbackChange)
+        if (addBuildBlocked) {
+          // build-blocked 语义优先：旧版已兜住，仍抛审批请求（不冒充降级成功）
+          throw new DesktopBuildApprovalNeeded(pendingAdd)
+        }
+        if (addCancelled) {
+          // 取消不冒充降级成功：已恢复旧版、未做升级
+          throw new DesktopOpsError('install-refused', `升级已被取消（${ctx.pkg}）：已恢复旧版 ${ctx.previousVersion}，未做升级`)
+        }
+        // 降级恢复（R4）：成功形态 + degraded 标记；跳过挂点2 登记——实际在装的是旧版，登记新版本会是假账
+        return {
+          ...verifiedRollback,
+          ...(governRetryNote !== undefined ? { governRetryNote } : {}),
+          degraded: true,
+          restoredTo: ctx.previousVersion,
+          twoStepNote,
+        }
       }
-      const verifiedRollback = await verifyAndBundle(rollbackChange)
+      // 0.10.1（E2E 实证 ③）：无 previousVersion——remove 已按官方语义执行、无旧版可回装。
+      // build-blocked / cancelled 语义照旧；其余按账实复读给恢复指引（缺席硬错误族）。
       if (addBuildBlocked) {
-        // build-blocked 语义优先：旧版已兜住，仍抛审批请求（不冒充降级成功）
         throw new DesktopBuildApprovalNeeded(pendingAdd)
       }
       if (addCancelled) {
-        // 取消不冒充降级成功：已恢复旧版、未做升级
-        throw new DesktopOpsError('install-refused', `升级已被取消（${ctx.pkg}）：已恢复旧版 ${ctx.previousVersion}，未做升级`)
+        throw new DesktopOpsError('install-refused', `安装已被取消（${ctx.pkg}）：未安装`)
       }
-      // 降级恢复（R4）：成功形态 + degraded 标记；跳过挂点2 登记——实际在装的是旧版，登记新版本会是假账
-      return {
-        ...verifiedRollback,
-        ...(governRetryNote !== undefined ? { governRetryNote } : {}),
-        degraded: true,
-        restoredTo: ctx.previousVersion,
-        twoStepNote,
+      let installedVersion: string | undefined
+      if (ctx.profileDir && ctx.listInstalled) {
+        try {
+          const row = (await ctx.listInstalled(ctx.profileDir)).items.find((it) => it.pkg === ctx.pkg)
+          installedVersion = row?.version
+        } catch {
+          // 复读失败按未知处理：缺席文案含「可能」字样，不断言
+        }
       }
+      const message = installedVersion !== undefined
+        ? `安装未完成，但账面显示 ${ctx.pkg}@${installedVersion} 已写入（激活阶段可能未完成）：请重启 Desktop 完成激活；如重启后仍异常，请在官方 Desktop 插件页手动处理${addDiagnostic !== '' ? `；失败原因：${addDiagnostic}` : ''}`
+        : `安装失败且无法自动恢复（${ctx.pkg}）：插件当前可能缺席，请在官方 Desktop 插件页手动重装${addDiagnostic !== '' ? `；失败原因：${addDiagnostic}` : ''}`
+      throw new DesktopOpsError(
+        'rollback-failed',
+        message,
+        {
+          pkg: ctx.pkg,
+          ...(addDiagnostic !== '' ? { addDiagnostic } : {}),
+          ...(pendingAdd.length > 0 ? { pendingBuilds: pendingAdd } : {}),
+          ...(installedVersion !== undefined ? { installedVersion } : {}),
+        },
+      )
     }
   }
 
