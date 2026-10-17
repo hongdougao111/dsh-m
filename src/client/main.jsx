@@ -27,11 +27,12 @@ const { pickPayload, parseToolArgs } = require("./tool-view.js");
 const { RESTART_POLL_MS, RESTART_DEADLINE_MS, nextRestartWait, isAmbiguousRestartRequestError } = require("./restart-wait.js");
 const { refreshAfterMutation } = require("./view-refresh.js");
 const { applyInstalledUpdates, installedUpdateStats } = require("./installed-updates.js");
-const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, TERMINAL_CLEARABLE, upgradeNotify, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
+const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
 const { groupOpsByDay, opRowVm, opUpgradeMeta, canRemoveRow, channelLabelKey } = require("./operations-view.js");
 const { createFavoritesStore, partitionStale } = require("./favorites.js");
 const { readSelfCheckCache, writeSelfCheckCache, clearSelfCheckCache, deriveChipState } = require("./self-check.js");
 const { shouldShowInstallCmd } = require("./install-cmd.js");
+const { createOpOutcome } = require("./op-outcome.js");
 
 // ---------- i18n（skillhub 同款：host locale.register + client lookup + {param} 插值） ----------
 const ZH = {
@@ -289,6 +290,8 @@ function lookup(key, params) {
   const dict = browserLang() === "en" ? EN : ZH;
   return interpolate(dict[key] ?? ZH[key] ?? key, params);
 }
+// 变更结局描述（GLOSSARY，0.9.94）：五类变更结局投影的成品文案装配单源；lookup 纯函数（字典静态），模块级实例化
+const oc = createOpOutcome(lookup);
 // 社区分类标签按界面语言取值（i18n）：en 用服务端 categoryLabelsEn 覆盖中文映射（缺 en 的 id 回退中文）
 function communityLabels(data) {
   const c = data && data.community && typeof data.community === "object" ? data.community : {};
@@ -1992,10 +1995,10 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
     : null;
   const zoneBar = zoneChips;
 
-  // 0.9.15：成功文案拆出——底层 toast 与 Modal 内终态行共用同一份
+  // 0.9.15：成功文案拆出——底层 toast 与 Modal 内终态行共用同一份（0.9.94：builds 段换 op-outcome）
   const installResultText = (res) =>
     lookup("notify.installed", { pkg: res.pkg, version: res.version ? ` v${res.version}` : "" }) +
-    (res.buildApprovals && res.buildApprovals.length ? lookup("notify.builds", { names: res.buildApprovals.join(", ") }) : res.fallbackAllBuilds ? lookup("notify.builds.fallback") : "") +
+    oc.buildsSuffix(res) +
     (res.bundleWarning === "no-patch-layer" ? lookup("notify.bundlewarning") : "");
   const installDone = (it2, res) => {
     notify({ kind: "ok", needsRestart: true, text: installResultText(res) });
@@ -2015,27 +2018,14 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
       installDone(it, res);
       await (onMutation ? onMutation() : reload(false));
     } catch (e) {
-      if (e && e.opSuperseded) {
-        notify({ kind: "ok", text: lookup("op.superseded.note", { target: it.name }) });
-        setInstallNote({ id: it.id, kind: "hint", text: lookup("op.superseded.note", { target: it.name }) });
-      } else if (e && e.guard) {
-        // 装后守卫拦截（M2 Task 3）：无 force 通道；一键重启只读 restartSafe
-        const guardText = [
-          lookup("guard.blocked"),
-          `${lookup("guard.compstatus")}: ${e.guard.compensation?.status || "—"}（${e.guard.compensation?.note || ""}）`,
-          e.guard.repairBasis ? `${lookup("guard.repairbasis")}: ${e.guard.repairBasis}` : null,
-          lookup("guard.noforce"),
-          e.guard.restartSafe ? lookup("guard.restartsafenow") : lookup("guard.restartunsafe"),
-        ].filter(Boolean).join(" | ");
-        notify({ kind: "err", text: guardText });
-        setInstallNote({ id: it.id, kind: "err", text: guardText });
-      } else if (e && e.issue) {
+      if (e && e.issue) {
         // peer 预检拦截 → 弹「仍要安装」确认（确认后带 force 重发；复用原记录 id——审计 #12）
         setCompatConfirm({ it, version, issue: e.issue, opId: e.opId });
       } else {
-        const failText = lookup("failed.install", { err: (e && e.message) || e });
-        notify({ kind: "err", text: failText });
-        setInstallNote({ id: it.id, kind: "err", text: failText });
+        // 0.9.94 变更结局描述（op-outcome）：superseded/guard/plain 三分支合一；M2 Task 3 守卫语义（无 force 通道、一键重启只读 restartSafe）随文案入模块
+        const m = oc.mutationFailed(e, { verb: "install", target: it.name });
+        notify({ kind: m.kind, text: m.text });
+        setInstallNote({ id: it.id, kind: m.kind === "ok" ? "hint" : "err", text: m.text });
       }
     }
   };
@@ -2050,34 +2040,16 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
         const m = opUpgradeMeta(r);
         return m ? { ...r, opMeta: m } : r;
       });
-      const note = upgradeNotify(res.activation); // 0.9.22 生效判定三态分流（client-only 不弹重启横幅）
-      const text = lookup("notify.upgraded", { pkg: res.pkg, from: res.fromVersion ? `v${res.fromVersion}` : "—", to: res.version ? `v${res.version}` : res.sha ? res.sha.slice(0, 7) : "latest" })
-        + (res.buildApprovals && res.buildApprovals.length ? lookup("notify.builds", { names: res.buildApprovals.join(", ") }) : res.fallbackAllBuilds ? lookup("notify.builds.fallback") : "")
-        + (note.suffixKey ? lookup(note.suffixKey) : "");
-      notify({ kind: "ok", needsRestart: note.needsRestart, text });
-      setInstallNote({ id: it.id, kind: "ok", text });
+      // 0.9.94：升级成功文案（from/to 箭头 + builds 后缀 + 0.9.22 生效判定三态分流，client-only 不弹重启横幅）单源 op-outcome
+      const ok = oc.upgradeOkText(res);
+      notify({ kind: "ok", needsRestart: ok.needsRestart, text: ok.text });
+      setInstallNote({ id: it.id, kind: "ok", text: ok.text });
       await (onMutation ? onMutation() : undefined);
     } catch (e) {
-      if (e && e.opSuperseded) {
-        const sup = lookup("op.superseded.note", { target: it.installedPkg });
-        notify({ kind: "ok", text: sup });
-        setInstallNote({ id: it.id, kind: "hint", text: sup });
-      } else if (e && e.guard) {
-        // 装后守卫拦截（与已装页同款文案链；无 force 通道，一键重启只读 restartSafe）
-        const guardText = [
-          lookup("guard.blocked"),
-          `${lookup("guard.compstatus")}: ${e.guard.compensation?.status || "—"}（${e.guard.compensation?.note || ""}）`,
-          e.guard.repairBasis ? `${lookup("guard.repairbasis")}: ${e.guard.repairBasis}` : null,
-          lookup("guard.noforce"),
-          e.guard.restartSafe ? lookup("guard.restartsafenow") : lookup("guard.restartunsafe"),
-        ].filter(Boolean).join(" | ");
-        notify({ kind: "err", text: guardText });
-        setInstallNote({ id: it.id, kind: "err", text: guardText });
-      } else {
-        const failText = lookup("failed.upgrade", { err: (e && e.message) || e });
-        notify({ kind: "err", text: failText });
-        setInstallNote({ id: it.id, kind: "err", text: failText });
-      }
+      // 0.9.94 变更结局描述（op-outcome）：superseded/guard/plain 三分支合一（与已装页同款文案链）
+      const m = oc.mutationFailed(e, { verb: "upgrade", target: it.installedPkg });
+      notify({ kind: m.kind, text: m.text });
+      setInstallNote({ id: it.id, kind: m.kind === "ok" ? "hint" : "err", text: m.text });
     }
   };
 
@@ -2534,11 +2506,9 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
       // （原 refreshViews 五连请求 → 1 个；渲染churn 同步下降，不稳定窗口缩短）
       await reload();
     } catch (e) {
-      if (e && e.opSuperseded) {
-        notify({ kind: "ok", text: lookup("op.superseded.note", { target: it.pkg }) });
-      } else {
-        notify({ kind: "err", text: lookup("toggle.failed", { err: (e && e.message) || e }) });
-      }
+      // 0.9.94 变更结局描述（op-outcome）：toggle 无守卫路径，guard 分支自然不触发
+      const m = oc.mutationFailed(e, { verb: "toggle", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
     } finally {
       // 成功＝服务端数据已收敛后摘除乐观覆盖；失败＝直接回滚到服务端态
       setPendingToggles((m) => {
@@ -2561,11 +2531,9 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
       });
       await (onMutation ? onMutation() : reload());
     } catch (e) {
-      if (e && e.opSuperseded) {
-        notify({ kind: "ok", text: lookup("op.superseded.note", { target: it.pkg }) });
-      } else {
-        notify({ kind: "err", text: lookup("failed.uninstall", { err: (e && e.message) || e }) });
-      }
+      // 0.9.94 变更结局描述（op-outcome）
+      const m = oc.mutationFailed(e, { verb: "uninstall", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
     }
   };
 
@@ -2577,35 +2545,14 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
         const m = opUpgradeMeta(r);
         return m ? { ...r, opMeta: m } : r;
       });
-      // 0.9.22 生效判定：needsRestart 分流 + 文案后缀（缺席 = github 源等未判定，维持现状横幅）
-      const note = upgradeNotify(res.activation);
-      notify({
-        kind: "ok",
-        needsRestart: note.needsRestart,
-        text: lookup("notify.upgraded", {
-          pkg: res.pkg,
-          from: res.fromVersion ? `v${res.fromVersion}` : "—",
-          to: res.version ? `v${res.version}` : res.sha ? res.sha.slice(0, 7) : "latest",
-        }) + (res.buildApprovals && res.buildApprovals.length ? lookup("notify.builds", { names: res.buildApprovals.join(", ") }) : res.fallbackAllBuilds ? lookup("notify.builds.fallback") : "") + (note.suffixKey ? lookup(note.suffixKey) : ""),
-      });
+      // 0.9.94：升级成功文案（含 0.9.22 生效判定三态分流，缺席 = github 源等未判定，维持现状横幅）单源 op-outcome
+      const ok = oc.upgradeOkText(res);
+      notify({ kind: "ok", needsRestart: ok.needsRestart, text: ok.text });
       await (onMutation ? onMutation() : reload());
     } catch (e) {
-      if (e && e.guard) {
-        notify({
-          kind: "err",
-          text: [
-            lookup("guard.blocked"),
-            `${lookup("guard.compstatus")}: ${e.guard.compensation?.status || "—"}（${e.guard.compensation?.note || ""}）`,
-            e.guard.repairBasis ? `${lookup("guard.repairbasis")}: ${e.guard.repairBasis}` : null,
-            lookup("guard.noforce"),
-            e.guard.restartSafe ? lookup("guard.restartsafenow") : lookup("guard.restartunsafe"),
-          ].filter(Boolean).join(" | "),
-        });
-      } else if (e && e.opSuperseded) {
-        notify({ kind: "ok", text: lookup("op.superseded.note", { target: it.pkg }) });
-      } else {
-        notify({ kind: "err", text: lookup("failed.upgrade", { err: (e && e.message) || e }) });
-      }
+      // 0.9.94 变更结局描述（op-outcome）：guard/superseded/plain 合一（今日 guard 在前，互斥分支语义等价）
+      const m = oc.mutationFailed(e, { verb: "upgrade", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
     }
   };
 
@@ -3383,15 +3330,12 @@ function DshmVersionChip({ version, notify, initialCheck, ops }) {
           }, { npm: "dsh-m" })
         : api("self-upgrade"));
       clearSelfCheckCache(typeof window !== "undefined" && window.localStorage ? window.localStorage : null);
-      // 升级成功：缓存已清、本地判回最新态；重启横幅由 notify 的 needsRestart 通道给出
+      // 升级成功：缓存已清、本地判回最新态；重启横幅由 notify 的 needsRestart 通道给出（builds 段 0.9.94 换 op-outcome）
       setCheck({ current: version, latest: null, outdated: false, ahead: false });
       notify({
         kind: "ok",
         needsRestart: true,
-        text: lookup("notify.selfupgraded", { from: version, to: res.version || "latest" }) +
-          (res.buildApprovals && res.buildApprovals.length
-            ? lookup("notify.builds", { names: res.buildApprovals.join(", ") })
-            : res.fallbackAllBuilds ? lookup("notify.builds.fallback") : ""),
+        text: lookup("notify.selfupgraded", { from: version, to: res.version || "latest" }) + oc.buildsSuffix(res),
       });
     } catch (e) {
       // Desktop 能力表拒绝（结构化 409）：不是失败——按官方入口指引出中性 info 横幅
@@ -3399,7 +3343,9 @@ function DshmVersionChip({ version, notify, initialCheck, ops }) {
       if (e && e.unsupported) {
         notify({ kind: "info", text: e.unsupported.guidance || (e && e.message) || String(e) });
       } else {
-        notify({ kind: "err", text: lookup("notify.selfupgraded.failed", { err: (e && e.message) || e }) });
+        // 0.9.94 变更结局描述（op-outcome）：与其余站点一致取 m.kind（今日 self-upgrade 无守卫/superseded 路径，恒 err；未来自升级接守卫时文案不错色）
+        const m = oc.mutationFailed(e, { verb: "self", target: "dsh-m" });
+        notify({ kind: m.kind, text: m.text });
       }
     } finally {
       setBusy(false);
@@ -4305,6 +4251,7 @@ function ToolCardRow({ it, onInstalled }) {
     } catch (err) {
       // M2 Task 3：静默分支不再吞守卫拦截——工具卡片就地标注（对话区文本仍为主通道）
       opsStore.upsert({ id: rec.id, status: err && err.issue ? "input" : "failed", error: String((err && err.message) || err) });
+      // 已知残余（0.9.94 grill Q1）：工具卡片短版守卫文案有意留守——单点、形状与全版不同（无 repairBasis/restartSafe 段），不为它扩接口。
       if (err && err.guard) {
         setGuardNote(`${lookup("guard.blocked")} · ${err.guard.compensation?.status || "—"} · ${lookup("guard.noforce")}`);
       }
