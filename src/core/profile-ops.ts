@@ -363,7 +363,7 @@ async function desktopInstallLocked(
     needsRestart: true,
     output: `official pluginManager: application=${change.application ?? 'applied'}, bundle=${bundleName}${change.changed === false ? ', changed=false' : ''}${governanceNote}${retryNote}${releaseAgeNotice}${registerNote ?? ''}${twoStepSuffix}${degradedSuffix}`,
     via: 'desktop-manager',
-    ...(change.application === 'overridden' ? { overridden : true } : {}),
+    ...(change.application === 'overridden' ? { overridden: true } : {}),
     ...(degradedRestoredTo !== undefined ? { degraded: true, restoredTo: degradedRestoredTo } : {}),
     // 0.10.0（评审 R1-2）：降级恢复的 version 落账为回装后实际版本（账实相符）；spec 字段保留尝试目标
     ...(degradedRestoredTo !== undefined ? { version: degradedRestoredTo } : {}),
