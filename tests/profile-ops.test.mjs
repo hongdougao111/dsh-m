@@ -800,6 +800,65 @@ describe('enable 竞速重试普适化 + 回装失败账实复读（0.10.1，真
   })
 })
 
+// ---------- 0.10.2（D3 dogfood 实证）：宿主自身 bundle 换装的 post-write 伪失败 → 账实改判 ----------
+
+describe('D3 账实改判（0.10.2，0.10.0→0.10.1 真机伪失败事件）', () => {
+  function d3Deps2(service, listInstalled) {
+    return {
+      getService: () => service,
+      npmLatest: async () => ({ version: '0.10.1', integrity: 'sha512-x' }),
+      npmTarballUrl: async () => 'https://registry.npmmirror.com/dsh-m/-/dsh-m-0.10.1.tgz',
+      listInstalled,
+    }
+  }
+  const AI_FAIL = { changed: false, application: 'failed', stage: 'install', error: { code: 'already-installed' } }
+
+  it('T-D1：终态失败但账面已写入目标版 → 改判成功（needsRestart=true、intent resolved ok、already-installed 非竞速形态不重试）', async () => {
+    process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...AI_FAIL }
+      },
+    })
+    const res = await desktopSelfUpgradeViaTarball('dsh-m', '0.10.0', { profileDir: 'X:/d3-d1' }, d3Deps2(service, async () => ({
+      items: [{ pkg: 'dsh-m', name: 'dsh-m', version: '0.10.1', spec: 'https://registry.npmmirror.com/dsh-m/-/dsh-m-0.10.1.tgz' }],
+      others: [],
+      complete: true,
+    })))
+    assert.equal(res.version, '0.10.1')
+    assert.equal(res.needsRestart, true, '改判成功仍需重启激活')
+    assert.match(res.output, /改判/)
+    assert.equal(calls.installBundle.length, 1, 'already-installed 非 enable 竞速形态：不重试')
+    const intent = await readUpgradeIntent()
+    assert.equal(intent?.status, 'resolved')
+    assert.equal(intent?.outcome, 'ok')
+  })
+
+  it('T-D2：终态失败且账面未到目标版 → 真失败原语义（intent resolved failed）', async () => {
+    process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { ...AI_FAIL }
+      },
+    })
+    await assert.rejects(
+      () => desktopSelfUpgradeViaTarball('dsh-m', '0.10.0', { profileDir: 'X:/d3-d2' }, d3Deps2(service, async () => ({
+        items: [{ pkg: 'dsh-m', name: 'dsh-m', version: '0.10.0', spec: '0.10.0' }],
+        others: [],
+        complete: true,
+      }))),
+      (err) => err instanceof DesktopOpsError && err.code === 'install-refused' && /自升级失败/.test(err.message) && /0\.10\.1/.test(err.message),
+    )
+    const intent = await readUpgradeIntent()
+    assert.equal(intent?.status, 'resolved')
+    assert.equal(intent?.outcome, 'failed')
+  })
+})
+
 // ---------- 0.10.0 Task 7：D3 自升级专用通道（tarball 直覆盖）+ SELF_PKG core 缝改道 ----------
 
 describe('desktopSelfUpgradeViaTarball：D3 tarball 直覆盖（0.10.0）', () => {

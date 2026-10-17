@@ -311,7 +311,7 @@ async function desktopInstallLocked(
   // 0.10.0 R6（install 臂）：dsh-m 已装态下的 install 调用实为升级（守卫必拦）→ 改道 D3；
   // 全新安装（未装）走既有单步——守卫不触发，R1「新装路径不动」。
   if (pkg === SELF_PKG && previousVersion !== undefined) {
-    return desktopSelfUpgradeViaTarballLocked(pkg, previousVersion, { timeoutMs, signal: opts.signal }, {
+    return desktopSelfUpgradeViaTarballLocked(pkg, previousVersion, { timeoutMs, signal: opts.signal, profileDir: opts.profileDir }, {
       getService: () => service,
       npmLatest: deps.npmLatest,
       npmTarballUrl: deps.npmTarballUrl,
@@ -906,7 +906,7 @@ export interface DesktopSelfUpgradeDeps {
 export async function desktopSelfUpgradeViaTarball(
   pkgName: string,
   currentVersion: string,
-  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+  opts: { timeoutMs?: number; signal?: AbortSignal; profileDir?: string } = {},
   deps: DesktopSelfUpgradeDeps = {},
 ): Promise<DesktopInstallResult & { needsRestart: boolean }> {
   return withMutationSession(() => desktopSelfUpgradeViaTarballLocked(pkgName, currentVersion, opts, deps))
@@ -915,7 +915,7 @@ export async function desktopSelfUpgradeViaTarball(
 async function desktopSelfUpgradeViaTarballLocked(
   pkgName: string,
   currentVersion: string,
-  opts: { timeoutMs?: number; signal?: AbortSignal },
+  opts: { timeoutMs?: number; signal?: AbortSignal; profileDir?: string },
   deps: DesktopSelfUpgradeDeps,
 ): Promise<DesktopInstallResult & { needsRestart: boolean }> {
   const service = await resolveManager(deps)
@@ -944,6 +944,33 @@ async function desktopSelfUpgradeViaTarballLocked(
       change = changeOf(await service.installBundle(spec, { enabled: true }))
     }
     if (isTerminalFailure(change)) {
+      // 0.10.2（D3 dogfood 实证，0.10.0→0.10.1 真机事件）：宿主对自身 bundle 换装存在 post-write 伪失败——
+      // installBundle 已写穿三面账（manifest/node_modules/lock 均为目标版）却回传 failed/already-installed
+      // （自指操作伪影：写完后 manifest 含该名，宿主完成路径自触守卫）。终态失败一律实读账面：
+      // 目标版已写入 = 升级事实成立，按成功改判（needsRestart=true，重启激活）；否则真失败（原语义）。
+      let installedVersion: string | undefined
+      if (opts.profileDir && deps.listInstalled) {
+        try {
+          const row = (await deps.listInstalled(opts.profileDir)).items.find((it) => it.pkg === pkgName)
+          installedVersion = row?.version
+        } catch {
+          // 复读失败按真失败处理
+        }
+      }
+      if (installedVersion === latest.version) {
+        await resolveIntent({ ok: true, installedVersion: latest.version })
+        return {
+          id: pkgName,
+          pkg: pkgName,
+          spec,
+          version: latest.version,
+          buildApprovals: Array.isArray(change.approvedBuilds) ? change.approvedBuilds : [],
+          fallbackAllBuilds: false,
+          needsRestart: true,
+          output: `official pluginManager (self-upgrade via tarball): application=${change.application ?? 'failed'}、error=${change.error?.code ?? 'terminal-failure'} 经账实复读改判成功——目标版 ${latest.version} 已写入（宿主自升级 post-write 伪失败），重启 Desktop 激活`,
+          via: 'desktop-manager',
+        }
+      }
       const pending = pendingOf(change)
       if (change.application === 'cancelled') {
         throw new DesktopOpsError('install-refused', `自升级已被取消（${pkgName}）：当前版本 ${currentVersion} 不受影响`)
@@ -1005,7 +1032,7 @@ async function desktopUpgradeLocked(
     const { items } = await (deps.listInstalled ?? defaultListInstalled)(opts.profileDir)
     const selfTarget = items.find((it) => it.pkg === pkg)
     if (!selfTarget) throw new DesktopOpsError('install-refused', `desktop profile 未安装该插件: ${pkg}（升级目标必须是已装插件）`)
-    return desktopSelfUpgradeViaTarballLocked(pkg, selfTarget.version, { timeoutMs, signal: opts.signal }, {
+    return desktopSelfUpgradeViaTarballLocked(pkg, selfTarget.version, { timeoutMs, signal: opts.signal, profileDir: opts.profileDir }, {
       getService: () => service,
       npmLatest: deps.npmLatest,
       npmTarballUrl: deps.npmTarballUrl,

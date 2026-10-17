@@ -190,29 +190,8 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
     assert.ok(!html.includes('⬆'), '旧进程判定不得出箭头')
     assert.ok(html.includes('v0.9.1'), '显示当前真实版本')
   })
-
-  // 0.10.0 Task 11（R7）：自升级确认框——入口点击只置确认态，D3 语义预告（不卸载/失败无损/重启生效）
-  it('DshmVersionChip outdated 默认不出确认框；initialConfirm 注入 → 确认框渲染 D3 语义预告 + 目标版本', () => {
-    const base = {
-      version: '0.9.94',
-      notify: () => {},
-      initialCheck: { current: '0.9.94', latest: '0.10.0', outdated: true, ahead: false },
-    }
-    const plain = renderToString(h(components.__DshmVersionChip, base))
-    assert.ok(
-      !plain.includes('将通过 tarball 直装通道') && !plain.includes('via the tarball direct-install'),
-      '未触发前零确认框',
-    )
-    assert.ok(plain.includes('<button'), '升级角标可点（入口全面保留）')
-    const confirmed = renderToString(h(components.__DshmVersionChip, { ...base, initialConfirm: true }))
-    assert.ok(
-      confirmed.includes('将通过 tarball 直装通道把 dsh-m 升级到 v0.10.0')
-        || confirmed.includes('Upgrade dsh-m to v0.10.0 via the tarball direct-install'),
-      '确认框 D3 语义预告 + 版本预填',
-    )
-    assert.ok(confirmed.includes('不经过卸载') || confirmed.includes('no uninstall involved'), '「不经过卸载」预告在')
-    assert.ok(confirmed.includes('需重启 Desktop') || confirmed.includes('Desktop restart'), '重启生效预告在')
-  })
+  // 0.10.2（主人 2026-10-17 裁决）：0.10.1 的自升级确认框已撤除（点击即升级，静默）——
+  // 相应 SSR 钉随交互退役；升级结局仍由成功/失败横幅如实报告（needsRestart 透传钉在 client-self-check）。
 
   it('RestartBanner idle 态渲染不抛（0.9.2 onRestarted 接线）', () => {
     const html = renderToString(h(components.__RestartBanner, {

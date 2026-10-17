@@ -139,9 +139,6 @@ const ZH = {
   "notify.upgraded": "已升级 {pkg}（{from} → {to}）", "notify.upgraded.clientonly": "。纯客户端更新：刷新页面即可生效，无需重启", "notify.upgraded.activationUnknown": "。生效判定未完成：为确保生效请重启 DSH Web", "notify.upgradehint": "（注意：该插件执行了构建脚本）",
   "op.degraded": "升级失败：新版安装未成功，已自动恢复旧版 {restoredTo}——插件当前可用，可稍后重试。",
   "notify.selfupgraded": "dsh-m 已升级（v{from} → v{to}）", "notify.selfupgraded.failed": "dsh-m 升级失败：{err}",
-  "selfupgrade.confirm": "将通过 tarball 直装通道把 dsh-m 升级到 {version}：不经过卸载，失败时当前版本不受影响；完成后需重启 Desktop 生效。",
-  "selfupgrade.confirm.noversion": "将通过 tarball 直装通道升级 dsh-m：不经过卸载，失败时当前版本不受影响；完成后需重启 Desktop 生效。",
-  "selfupgrade.go": "升级",
   "failed.install": "安装失败：{err}", "failed.uninstall": "卸载失败：{err}", "failed.upgrade": "升级失败：{err}",
   "failed.load": "加载失败：{err}", "failed.read": "读取失败：{err}", "failed.open": "打开市场面板失败:",
   "banner.done": "变更完成，需要重启 DSH Web 后生效。",
@@ -263,9 +260,6 @@ const EN = {
   "notify.upgraded": "Upgraded {pkg} ({from} → {to})", "notify.upgraded.clientonly": ". Client-only update: refresh the page to take effect — no restart needed", "notify.upgraded.activationUnknown": ". Activation classification unavailable: restart DSH Web to ensure the new version is live", "notify.upgradehint": " (note: this plugin ran build scripts)",
   "op.degraded": "Upgrade failed: the new version did not install — rolled back to {restoredTo}. The plugin still works; you can retry later.",
   "notify.selfupgraded": "dsh-m upgraded (v{from} → v{to})", "notify.selfupgraded.failed": "dsh-m upgrade failed: {err}",
-  "selfupgrade.confirm": "Upgrade dsh-m to {version} via the tarball direct-install channel: no uninstall involved, the current version stays intact on failure; a Desktop restart is needed afterwards.",
-  "selfupgrade.confirm.noversion": "Upgrade dsh-m via the tarball direct-install channel: no uninstall involved, the current version stays intact on failure; a Desktop restart is needed afterwards.",
-  "selfupgrade.go": "Upgrade",
   "failed.install": "Install failed: {err}", "failed.uninstall": "Uninstall failed: {err}", "failed.upgrade": "Upgrade failed: {err}",
   "failed.load": "Load failed: {err}", "failed.read": "Read failed: {err}", "failed.open": "Failed to open the marketplace panel:",
   "banner.done": "Changes applied. Restart DSH Web to take effect.",
@@ -3313,7 +3307,7 @@ const TABS = [
 // ---------- 头部 dsh-m 版本角标（0.9.1：常态静默只显版本；self-check 判 outdated 才点亮为可点升级角标） ----------
 // 数据源：host self-check（npm latest vs 装机版本）；localStorage TTL 缓存防每次开面板都打 npm。
 // 静默口径（主人 2026-10-01）：已最新 / 检查失败 / 本地 dev 领先 npm 一律维持 0.7.5 静态样式。
-function DshmVersionChip({ version, notify, initialCheck, ops, initialConfirm }) {
+function DshmVersionChip({ version, notify, initialCheck, ops }) {
   const [check, setCheck] = useState(() =>
     initialCheck !== undefined
       ? initialCheck
@@ -3322,8 +3316,6 @@ function DshmVersionChip({ version, notify, initialCheck, ops, initialConfirm })
           : null),
   );
   const [busy, setBusy] = useState(false);
-  // 0.10.0 R7：自升级确认框受控态（initialConfirm 为 SSR/测试注入位，同 initialCheck 先例）
-  const [confirming, setConfirming] = useState(initialConfirm === true);
   useEffect(() => {
     if (initialCheck !== undefined) return; // 测试注入态不联网
     let live = true;
@@ -3338,15 +3330,15 @@ function DshmVersionChip({ version, notify, initialCheck, ops, initialConfirm })
       .catch(() => {}); // 检查失败静默——「没有新版本」不打扰
     return () => { live = false; };
   }, [initialCheck]);
-  // 0.10.0 R7：入口点击只置确认态——确认前零 api（D3 语义预告：不卸载、失败无损、重启生效）
+  // 0.10.2（主人 2026-10-17 裁决）：静默自升级——角标点击直接升级（0.10.1 确认框撤除：
+  // 多一步确认破坏既有「点击即升级」体验；失败无损语义由 D3 通道本体保证，结局由横幅如实报告）。
   const doUpgrade = async () => {
     if (busy) return;
-    setConfirming(true);
+    return performUpgrade();
   };
-  // 确认后的真升级臂——self-upgrade 请求全文件唯一直呼点（确认后才发生）。
+  // 升级臂——self-upgrade 请求全文件唯一直呼点。
   const performUpgrade = async () => {
     if (busy) return;
-    setConfirming(false);
     setBusy(true);
     try {
       // 0.9.85（主人真机反馈：头部自升级在操作日志无记录）：入本地操作泵——渠道归属面板
@@ -3388,39 +3380,6 @@ function DshmVersionChip({ version, notify, initialCheck, ops, initialConfirm })
   };
   const state = deriveChipState(check, version);
   if (state.kind === "outdated") {
-    // 0.10.0 R7：确认框（复用面板 Modal 骨架 dshm-compat-*）——版本未知时退化为无版本句式
-    if (confirming) {
-      return h(
-        "div",
-        { className: "dshm-compat-overlay", ...backdropCloseHandlers(() => setConfirming(false)) },
-        h(
-          "div",
-          { className: "dshm-compat-dialog", onClick: (e) => e.stopPropagation() },
-          h("div", { className: "dshm-compat-title" }, lookup("selfupdate.available", { v: state.latest || "?" })),
-          h(
-            "div",
-            { className: "dshm-compat-body" },
-            state.latest
-              ? lookup("selfupgrade.confirm", { version: `v${state.latest}` })
-              : lookup("selfupgrade.confirm.noversion"),
-          ),
-          h(
-            "div",
-            { className: "dshm-actions" },
-            h(
-              "button",
-              { className: "dshm-btn", onClick: () => setConfirming(false) },
-              lookup("common.later"),
-            ),
-            h(
-              "button",
-              { className: "dshm-btn primary", onClick: performUpgrade, disabled: busy },
-              lookup("selfupgrade.go"),
-            ),
-          ),
-        ),
-      );
-    }
     return h(
       "button",
       {

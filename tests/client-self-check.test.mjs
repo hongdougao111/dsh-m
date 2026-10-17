@@ -137,42 +137,38 @@ describe('deriveChipState 三态', () => {
   })
 })
 
-// ---------- 0.10.0 Task 11：自升级确认先行（结构序钉，main.jsx 源串） ----------
-describe('0.10.0 自升级确认先行（结构序钉）', () => {
+// ---------- 0.10.2（主人 2026-10-17 裁决）：静默自升级——撤确认框，角标点击直接升级（结构钉） ----------
+describe('0.10.2 静默自升级（结构序钉；0.10.1 确认框按主人体验裁决撤除）', () => {
   const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
 
-  it('① doUpgrade 只置确认态：函数体内零 api( 调用；api("self-upgrade") 全部收敛进确认后的 performUpgrade', () => {
+  it('① doUpgrade 直呼 performUpgrade（零中间确认态）；self-upgrade 调用全部收敛在升级臂', () => {
     const start = src.indexOf('const doUpgrade = async () => {')
     const end = src.indexOf('const performUpgrade = async () => {')
     assert.ok(start >= 0 && end > start, 'doUpgrade / performUpgrade 两段结构在')
     const doBody = src.slice(start, end)
-    assert.ok(!doBody.includes('api('), '确认前零 api 调用')
-    assert.ok(doBody.includes('setConfirming(true)'), 'doUpgrade 仅置确认态（R7 确认先行）')
-    // runOp 臂 + 无 ops 回退臂（SSR/探针，0.9.84- 行为）都只允许出现在确认后的 performUpgrade 内
+    assert.ok(!doBody.includes('api('), '升级臂外零 self-upgrade 调用')
+    assert.ok(doBody.includes('performUpgrade()'), '点击即升级（静默，0.10.1 确认框已撤）')
+    assert.ok(!src.includes('setConfirming'), '确认态已整体移除')
+    // runOp 臂 + 无 ops 回退臂（SSR/探针，0.9.84- 行为）都只允许出现在升级臂内
     let idx = -1
     while ((idx = src.indexOf('api("self-upgrade")', idx + 1)) >= 0) {
-      assert.ok(idx > end, `self-upgrade 调用必须位于确认后臂（偏移 ${idx}）`)
+      assert.ok(idx > end, `self-upgrade 调用必须位于升级臂（偏移 ${idx}）`)
     }
-    assert.ok(src.includes('api("self-upgrade")'), '确认后臂存在')
+    assert.ok(src.includes('api("self-upgrade")'), '升级臂存在')
+  })
+
+  it('② 确认框文案键与按钮键零残留（dead key 清理）', () => {
+    assert.ok(!src.includes('selfupgrade.confirm'), 'confirm 句式键已退役')
+    assert.ok(!src.includes('selfupgrade.go'), '确认按钮键已退役')
   })
 
   it('③ needsRestart 忠实透传响应值（R10）：res.needsRestart ?? true——applied→false 不弹重启横幅', () => {
     assert.ok(src.includes('needsRestart: res.needsRestart ?? true'), '透传锚（旧 needsRestart: true 已退役）')
-    // 评审 R1-3：负向锚改单行切片锚（含 \n 的多行锚在 CRLF 工作树恒真、回归保护失效）
+    // 评审 R1-3：负向锚用单行切片锚（含 \n 的多行锚在 CRLF 工作树恒真、回归保护失效）
     const start = src.indexOf('const performUpgrade = async () => {')
     const end = src.indexOf('const state = deriveChipState(check, version);')
     assert.ok(start >= 0 && end > start, 'performUpgrade 切片边界在')
     const body = src.slice(start, end)
     assert.ok(!body.includes('needsRestart: true'), '升级臂内不得残留硬编码 needsRestart: true（单行锚，CRLF 免疫）')
-  })
-
-  it('② 确认框文案双句式：有版本预填 {version}；state.latest 缺失退化为无版本句式（防御性）', () => {
-    assert.ok(src.includes('lookup("selfupgrade.confirm", { version: `v${state.latest}` })'), '有版本句式锚')
-    assert.ok(src.includes(': lookup("selfupgrade.confirm.noversion")'), '无版本退化句式锚')
-  })
-
-  it('⑤ 确认框按钮：确认键走 performUpgrade；取消键复用 common.later', () => {
-    assert.ok(src.includes('onClick: performUpgrade'), '确认键绑定 performUpgrade（api 只此一臂）')
-    assert.ok(src.includes('lookup("common.later")'), '取消键复用 common.later')
   })
 })

@@ -383,14 +383,16 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
 
         case 'self-upgrade': {
           assertWriteAllowed(profile, 'self-upgrade')
-          // 0.10.0 D3 自升级专用通道（desktop）：tarball 直覆盖。desktopInstall 的 registry spec 在
-          // 0.2.1 宿主必撞 already-installed 守卫，而 remove+add 对调用者自身是破坏性路径（R6：自升级
-          // 绝不落入通用两步——改道唯一执行点在 core 缝，此处调 D3 入口即语义同源）；tarball spec
-          // 不受守卫约束（spike 实证）。恒 panel 语义零外部日志（ADR-0018），intent 预写/收口在 core 层。
+          // 0.10.0 D3 自升级专用通道（desktop）：tarball 直装。0.10.2 实证修订：0.2.1 守卫经
+          // specPackageName 对 tarball URL 同样解析包名（自升级写穿后宿主完成路径自触守卫 = post-write
+          // 伪失败），由 D3 的账实复读改判兜住；通道分治不变——remove+registry-spec 通用两步仍不达自升级。
+          // 恒 panel 语义零外部日志（ADR-0018），intent 预写/收口在 core 层。
           if (profile.kind !== 'web') {
             const managed = await d.desktopSelfUpgradeViaTarball(ctx.pkg.name, ctx.pkg.version, {
               timeoutMs: cfg().timeoutMs,
               signal,
+              // 0.10.2：账实复读（post-write 伪失败改判）需要 profile 目录
+              profileDir: profile.dir,
             }, {
               getService: d.getService,
               ensureService: d.ensureService,
