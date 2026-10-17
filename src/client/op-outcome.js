@@ -18,7 +18,7 @@ const PLAIN_FAIL_KEY = {
 
 /**
  * @param {(key: string, params?: Record<string, string>) => string} lookup
- * @returns {{ guardBlockedText, buildsSuffix, upgradeOkText, mutationFailed }}
+ * @returns {{ guardBlockedText, buildsSuffix, upgradeOkText, degradedOutcome, mutationFailed }}
  */
 export function createOpOutcome(lookup) {
   /** 守卫全版五段装配（原 main.jsx 三处逐字收敛，字节不变）：拦截头 | 补偿状态 | 修复依据(可选) | 无强装 | 重启安全性。 */
@@ -53,6 +53,13 @@ export function createOpOutcome(lookup) {
     }
   }
 
+  /** 降级恢复结局（0.10.0 R4）：升级失败但已自动回装旧版——core 成功形态 + degraded 标记的
+   *  统一 warn 投影；非 degraded 输入返回 null（调用点不命中新分支，走既有成功臂）。 */
+  const degradedOutcome = (res) =>
+    res && res.degraded === true
+      ? { kind: "warn", text: lookup("op.degraded", { restoredTo: res.restoredTo || "—" }) }
+      : null
+
   /** 变更失败描述：superseded → ok；guard → err（guardBlockedText）；其余 → err failed.<verb>。副作用（notify/setInstallNote）留守调用点。 */
   const mutationFailed = (e, { verb, target }) => {
     if (e && e.opSuperseded) return { kind: 'ok', text: lookup('op.superseded.note', { target }) }
@@ -60,5 +67,5 @@ export function createOpOutcome(lookup) {
     return { kind: 'err', text: lookup(PLAIN_FAIL_KEY[verb], { err: (e && e.message) || e }) }
   }
 
-  return { guardBlockedText, buildsSuffix, upgradeOkText, mutationFailed }
+  return { guardBlockedText, buildsSuffix, upgradeOkText, degradedOutcome, mutationFailed }
 }

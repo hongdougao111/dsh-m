@@ -1,9 +1,10 @@
 /**
- * 已装页两段加载合并/统计纯逻辑（ADR-0008）。
+ * 已装页两段加载合并/统计纯逻辑（ADR-0008）+ 0.10.0 降级恢复站点接线结构锚。
  * 运行：node --test tests/client-installed-updates.test.mjs
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { applyInstalledUpdates, installedUpdateStats } from '../src/client/installed-updates.js'
 
@@ -60,5 +61,29 @@ describe('installedUpdateStats', () => {
     ]
     assert.deepEqual(installedUpdateStats(items), { outdatedCount: 2, incompleteCount: 2 })
     assert.deepEqual(installedUpdateStats(null), { outdatedCount: 0, incompleteCount: 0 })
+  })
+})
+
+// ---------- 0.10.0 Task 10：降级恢复结局站点接线（main.jsx 源串结构锚；单行锚——避开 CRLF 多行锚陷阱） ----------
+describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表两处升级站点）', () => {
+  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+  const count = (needle) => src.split(needle).length - 1
+
+  it('① 两处升级站点都先问降级分支（恰两处）', () => {
+    assert.equal(count('const degraded = oc.degradedOutcome(res);'), 2, '市场卡 doUpgrade + 已装列表 doUpgrade 各一处')
+  })
+
+  it('② 降级分支 warn 通知、不进 upgradeOkText 成功臂（守卫分支恰两处）', () => {
+    assert.equal(count('if (degraded) {'), 2)
+    assert.equal(count('notify({ kind: "warn", text: degraded.text });'), 2, '降级走 warn（零「升级成功 vX→vY」路径）')
+  })
+
+  it('③ 市场卡站点同步 setInstallNote 降级句（恰一处；已装列表站点无 installNote 惯例）', () => {
+    assert.equal(count('setInstallNote({ id: it.id, kind: "warn", text: degraded.text });'), 1)
+  })
+
+  it('④ 文案键双字典同层：op.degraded zh 逐字 + en 键在位', () => {
+    assert.ok(src.includes('"op.degraded": "升级失败：新版安装未成功，已自动恢复旧版 {restoredTo}——插件当前可用，可稍后重试。"'), 'zh 字典逐字锚')
+    assert.equal(count('"op.degraded":'), 2, 'zh/en 各一枚')
   })
 })

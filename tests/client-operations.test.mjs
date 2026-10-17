@@ -5,6 +5,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
 import { groupOpsByDay } from '../src/client/operations-view.js'
@@ -394,6 +395,43 @@ describe('createOpsPump（0.7.0 评审 P4：生产泵的直接测试）', () => 
       const stored = store.list().find((r) => r.id === 'm6')
       assert.equal(stored.status, 'done')
       assert.equal(stored.meta.to, '3.0.0')
+    })
+  })
+
+  // ---------- 0.10.0 Task 12：降级恢复落账（R12/R13）——零新状态，复用 'warned' + meta 载荷 ----------
+  describe('降级恢复落账（0.10.0 Task 12）', () => {
+    it('① runOp 收到 degraded:true + restoredTo 结果 → 落账 status warned 且 meta 携带 degraded/restoredTo（opMeta 同账合并）', async () => {
+      const { store, pump } = setup(null)
+      await pump.enqueue(
+        rec({ id: 'dg1', kind: 'upgrade', target: 'dsh-m', status: 'queued' }),
+        async () => ({ degraded: true, restoredTo: '0.9.0', opMeta: { from: '0.9.0', to: '0.10.0' } }),
+      )
+      const stored = store.list().find((r) => r.id === 'dg1')
+      assert.equal(stored.status, 'warned', '降级复用既有 warned 态（零新状态、零新文案键）——opsAttention 口径（failed||warned）据此自动点亮设置 Tab 红点')
+      assert.equal(stored.meta.degraded, true)
+      assert.equal(stored.meta.restoredTo, '0.9.0')
+      assert.equal(stored.meta.to, '0.10.0', 'opMeta 版本事实同账保留')
+    })
+
+    it('② 非 degraded 结果零行为漂移：普通 done 与 opWarning→warned 路径原样、零 meta 污染', async () => {
+      const { store, pump } = setup(null)
+      await pump.enqueue(rec({ id: 'n1', target: 't1', status: 'queued' }), async () => ({ okv: 1 }))
+      await pump.enqueue(rec({ id: 'n2', target: 't2', status: 'queued' }), async () => ({ opWarning: 'x' }))
+      await pump.enqueue(rec({ id: 'n3', target: 't3', status: 'queued' }), async () => ({ degraded: false, restoredTo: '0.9.0' }))
+      const by = Object.fromEntries(store.list().map((r) => [r.id, r.status]))
+      assert.equal(by.n1, 'done')
+      assert.equal(by.n2, 'warned')
+      assert.equal(by.n3, 'done', 'degraded:false 不命中新分支')
+      assert.equal(store.list().find((r) => r.id === 'n3').meta.degraded, undefined, '非降级零 meta 污染')
+    })
+
+    it('③ 徽标口径与 × 删除通道零改动（main.jsx 源锚）：warned 计入红点、× 走既有 op.remove', () => {
+      const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+      assert.ok(
+        src.includes('const opsAttention = opRecords.some((r) => r.status === "failed" || r.status === "warned");'),
+        '红点口径 failed||warned 原样在——dismiss（移除记录）后随 syncOps 自灭（R13 徽标清零路径）',
+      )
+      assert.ok(src.includes('title: lookup("op.remove")'), '× 删除走既有 op.remove 通道（删除仅移除记录，不改真实插件状态字段）')
     })
   })
 })

@@ -71,6 +71,19 @@ describe('op-outcome · buildsSuffix（×4 收敛原样）', () => {
   })
 })
 
+describe('op-outcome · degradedOutcome（0.10.0 R4 降级恢复投影）', () => {
+  it('① degraded 输入 → kind=warn、text 走 op.degraded 键且携带 restoredTo', () => {
+    assert.deepEqual(oc.degradedOutcome({ degraded: true, restoredTo: '0.9.0' }),
+      { kind: 'warn', text: 'op.degraded{restoredTo=0.9.0}' })
+  })
+
+  it('② 非 degraded 输入不命中新分支（null）：degraded:false / 字段全缺 / undefined', () => {
+    assert.equal(oc.degradedOutcome({ degraded: false, restoredTo: '0.9.0' }), null)
+    assert.equal(oc.degradedOutcome({}), null)
+    assert.equal(oc.degradedOutcome(undefined), null)
+  })
+})
+
 describe('op-outcome · upgradeOkText（升级成功文案 ×2 逐字收敛原样）', () => {
   it('① version 三态之首：v 前缀 + client-only 后缀 + 不需重启', () => {
     assert.deepEqual(oc.upgradeOkText({ pkg: 'p', fromVersion: '1.0.0', version: '1.2.3', activation: 'client-only' }),

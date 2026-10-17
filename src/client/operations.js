@@ -376,10 +376,17 @@ export function createOpsPump(store, getCtx) {
           // 仅成功/warned 路径生效；失败路径结果不可信，不入账。
           const opMeta = value && typeof value === 'object' && value.opMeta && typeof value.opMeta === 'object' ? value.opMeta : null
           const cur = opMeta ? store.list().find((x) => x.id === queued.id) : null
+          // 0.10.0 R12：降级恢复（升级失败但已自动回装旧版）复用既有 'warned' 状态落账（零新状态、
+          // 零新状态文案键）——meta 携带 {degraded, restoredTo}；opsAttention 对 warned 的既有统计
+          // 自动点亮设置 Tab 红点，× 删除走既有 op.remove 通道（R13）。
+          const degraded = value && typeof value === 'object' && value.degraded === true
+            ? { degraded: true, restoredTo: value.restoredTo }
+            : null
+          const mergedMeta = opMeta || degraded ? { ...((cur && cur.meta) || {}), ...(opMeta || {}), ...(degraded || {}) } : null
           finalize({
-            status: value && value.opWarning ? 'warned' : 'done',
+            status: (value && value.opWarning) || degraded ? 'warned' : 'done',
             warning: value && value.opWarning,
-            ...(opMeta ? { meta: { ...((cur && cur.meta) || {}), ...opMeta } } : {}),
+            ...(mergedMeta ? { meta: mergedMeta } : {}),
           })
           if (waitersEntry) waitersEntry.resolve(value)
         } else {

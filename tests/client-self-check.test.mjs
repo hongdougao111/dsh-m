@@ -2,9 +2,11 @@
  * 头部版本角标 self-check 纯逻辑单测（0.9.1）。
  * 覆盖：TTL 缓存读写清、畸形/过期/版本护栏作废、deriveChipState 三态判定。
  * 需求口径：只有 outdated 才点亮（{ kind: 'outdated' }），其余一律静默。
+ * 0.10.0 Task 11：自升级确认先行结构序钉（确认前零 api / needsRestart 透传）。
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   SELF_CHECK_STORAGE_KEY,
   SELF_CHECK_TTL_MS,
@@ -132,5 +134,40 @@ describe('deriveChipState 三态', () => {
     assert.deepEqual(deriveChipState(undefined, '0.9.0'), { kind: 'idle' })
     assert.deepEqual(deriveChipState('junk', '0.9.0'), { kind: 'idle' })
     assert.deepEqual(deriveChipState({ current: '0.9.0', latest: null, outdated: false, ahead: false, error: 'network' }, '0.9.0'), { kind: 'idle' })
+  })
+})
+
+// ---------- 0.10.0 Task 11：自升级确认先行（结构序钉，main.jsx 源串） ----------
+describe('0.10.0 自升级确认先行（结构序钉）', () => {
+  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+
+  it('① doUpgrade 只置确认态：函数体内零 api( 调用；api("self-upgrade") 全部收敛进确认后的 performUpgrade', () => {
+    const start = src.indexOf('const doUpgrade = async () => {')
+    const end = src.indexOf('const performUpgrade = async () => {')
+    assert.ok(start >= 0 && end > start, 'doUpgrade / performUpgrade 两段结构在')
+    const doBody = src.slice(start, end)
+    assert.ok(!doBody.includes('api('), '确认前零 api 调用')
+    assert.ok(doBody.includes('setConfirming(true)'), 'doUpgrade 仅置确认态（R7 确认先行）')
+    // runOp 臂 + 无 ops 回退臂（SSR/探针，0.9.84- 行为）都只允许出现在确认后的 performUpgrade 内
+    let idx = -1
+    while ((idx = src.indexOf('api("self-upgrade")', idx + 1)) >= 0) {
+      assert.ok(idx > end, `self-upgrade 调用必须位于确认后臂（偏移 ${idx}）`)
+    }
+    assert.ok(src.includes('api("self-upgrade")'), '确认后臂存在')
+  })
+
+  it('③ needsRestart 忠实透传响应值（R10）：res.needsRestart ?? true——applied→false 不弹重启横幅', () => {
+    assert.ok(src.includes('needsRestart: res.needsRestart ?? true'), '透传锚（旧 needsRestart: true 已退役）')
+    assert.ok(!src.includes('needsRestart: true,\n        text: lookup("notify.selfupgraded"'), '硬编码 true 形态已退役')
+  })
+
+  it('② 确认框文案双句式：有版本预填 {version}；state.latest 缺失退化为无版本句式（防御性）', () => {
+    assert.ok(src.includes('lookup("selfupgrade.confirm", { version: `v${state.latest}` })'), '有版本句式锚')
+    assert.ok(src.includes(': lookup("selfupgrade.confirm.noversion")'), '无版本退化句式锚')
+  })
+
+  it('⑤ 确认框按钮：确认键走 performUpgrade；取消键复用 common.later', () => {
+    assert.ok(src.includes('onClick: performUpgrade'), '确认键绑定 performUpgrade（api 只此一臂）')
+    assert.ok(src.includes('lookup("common.later")'), '取消键复用 common.later')
   })
 })
