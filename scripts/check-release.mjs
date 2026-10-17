@@ -27,7 +27,7 @@ check(`package.json version = ${version}`, typeof version === 'string' && versio
 check('lock 根字段 version 一致', lock.version === version, `lock.version = ${lock.version}`)
 check('lock packages."" version 一致', lock.packages?.['']?.version === version, `packages."" = ${lock.packages?.['']?.version}`)
 
-const lines = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split('\n')
+const lines = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split(/\r?\n/)
 const topAfter = (marker) => {
   const idx = lines.indexOf(marker)
   return idx === -1 ? null : lines.slice(idx + 1).find((l) => l.startsWith('### '))
