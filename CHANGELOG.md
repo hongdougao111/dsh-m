@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.1 修复：0.10.0 真机 E2E 实证缺陷三连——enable 竞速重试普适化 + 回装失败账实复读 + 守卫命中一律两步化
+
+- **需求（2026-10-17，0.10.0 装机当日 E2E 实证，真机 skip-auth@0.4.1 与卸载→重装两个事件）**：①插件树重载窗口的 enable 阶段激活竞速（`pending (waiting for service: webRuntime)`）会让两步升级的第二腿、兜底回装腿与 D3 自升级通道直接终态失败——0.9.94 时代的「enable 失败自动重试一次（重试即愈）」本地增强只覆盖了首腿；②回装腿报失败 ≠ 真缺席——pnpm 可能已写入账面（激活阶段失败），此时建议「手动重装旧版」会误导用户降级；③卸载后同会话重装：宿主活跃态/manifest 字面仍视其在装（守卫命中），而 previousVersion 探测口径为「未安装」，0.10.0 的 previousVersion 前置门使守卫命中原样透传 already-installed。
+- **方案**：① enable 竞速自动重试普适化——首腿、两步第二腿、兜底回装腿、D3 通道同享受限单次重试（`installOnceRetryingEnable`，退避与豁免形态不变）；② 宣称缺席前实读账面（listInstalled）——已写入 → 「请重启 Desktop 完成激活」（details.installedVersion 如实透出），真缺席 → 重装指引，两条路径零误导性降级建议；③ install 路径守卫命中一律两步化（remove+add 即官方语义，去掉 previousVersion 前置门），无旧版可回装时失败走同款账实复读。附带：check-release 门禁行分割容忍 CRLF（本机工作树双语顶条恒找不到的修复）。
+- **验证**：typecheck 零错误；全量 1595 例（新增 8 钉：T-A1/A2/A3 enable 竞速三腿 + T-B1/B2 账实复读两形态 + T-C1/C2/C3 无旧版守卫两步化三态；18 例既有失败为 028 本机环境清单零新增）；真机恢复实录：skip-auth 0.4.1 经「重启激活」恢复（零重装），重启后守卫锚点干净。
+
 ### 0.10.0 特性+修复：宿主 0.2.1 already-installed 适配——第三方两步升级 + 兜底回装降级恢复 + 自升级专用通道（D3）
 
 - **需求（2026-10-17，主人）**：新版 DSH（0.2.1-rc.1/rc.2）中 dsh-m 无法升级与自升级任何包。根因定谳：宿主 `installBundle()` 新增 already-installed 安装守卫——spec 解析出的包名已在 profile manifest 就先于 pnpm 拒绝，官方升级语义改为「先卸载再安装」；tarball/git 形态 spec 包名在 pnpm 前不可知、不受守卫约束（真机 spike 实证：URL 覆盖安装已装 dsh-m 成功、激活形态 restart-required）。影响面：产品内 desktop 升级/自升级全断；卸载、开关、全新安装、web 路径无恙。跳过 0.9.95+ 直接发 0.10.0。
@@ -666,6 +672,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.1 — three defects proven by same-day real-machine E2E of 0.10.0: enable-race retry universalized + account-reality re-read on rollback failure + guard hit always two-steps
+
+- **Need (2026-10-17, proven during the same-day real-machine E2E of 0.10.0 — the skip-auth@0.4.1 upgrade event and the uninstall→reinstall event)**: ① the enable-stage activation race during plugin-tree reload windows (`pending (waiting for service: webRuntime)`) made the two-step upgrade's second leg, the rollback reinstall leg, and the D3 self-upgrade channel fail terminally — the 0.9.94-era "retry enable failures once (retry heals)" local enhancement covered only the first leg; ② a failed reinstall leg ≠ true absence — pnpm may have already written the package (activation failed afterwards), where advising "manually reinstall the old version" would mislead the user into a downgrade; ③ uninstall followed by a same-session reinstall: the host's live state / literal manifest still considers the package installed (guard fires) while the previousVersion probe reports "not installed", so 0.10.0's previousVersion precondition let the raw already-installed error surface.
+- **Approach**: ① universalize the enable-race auto-retry — the first leg, the two-step second leg, the rollback reinstall leg, and the D3 channel all share the limited single retry (`installOnceRetryingEnable`; backoff and exempted failure shapes unchanged); ② re-read the ledger (listInstalled) before claiming absence — if written → "restart Desktop to finish activation" (with `details.installedVersion` surfaced truthfully), if truly absent → reinstall guidance; neither path suggests a misleading downgrade; ③ on the install path a guard hit always two-steps (remove+add is the official semantics; the previousVersion precondition is removed), and a failure without an old version to roll back to goes through the same ledger re-read. Incidental: the check-release gate now splits lines CRLF-tolerantly (fixing the bilingual top-entry false negative on CRLF working trees).
+- **Verification**: typecheck clean; full suite 1595 tests (8 new pins: T-A1/A2/A3 enable-race on three legs + T-B1/B2 both ledger-re-read shapes + T-C1/C2/C3 three states of guard-hit two-step without an old version; 18 pre-existing failures are the 028 machine-environment set, zero new); real-machine recovery record: skip-auth 0.4.1 recovered via "restart to activate" (zero reinstall), guard journal anchors clean after restart.
 
 ### Feature + fix in 0.10.0 — host 0.2.1 already-installed adaptation: third-party two-step upgrade + rollback-reinstall degraded restore + dedicated self-upgrade channel (D3)
 
