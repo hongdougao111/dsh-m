@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.2 修复：D3 自升级 post-write 伪失败账实改判 + 静默自升级（0.10.0→0.10.1 dogfood 实证轮）
+
+- **需求（2026-10-18 凌晨，首次 D3 真机 dogfood——0.10.0→0.10.1 自升级事件）**：自升级报失败（`application=failed、error=already-installed`）但三面账（manifest/node_modules/lock）均已写入 0.10.1——宿主对自身 bundle 换装存在 **post-write 伪失败**：installBundle 写穿后 manifest 含该名，宿主完成路径自触守卫（自指操作伪影；守卫源码 `specPackageName` 对 tarball URL 同样可解析包名）。另：0.10.1 引入的自升级确认框破坏既有「点击即升级」体验（主人裁决撤除）。
+- **方案**：① **D3 终态失败一律账实复读改判**——实读 listInstalled：目标版已写入 = 升级事实成立，按成功改判（needsRestart=true 提示重启激活，output 留改判痕）；未到目标 = 真失败原语义；profileDir 自 host-api/两处缝透传。② **静默自升级**——确认框整体撤除（受控态/Modal/文案键/SSR 钉），角标点击直接升级，结局由成功/失败横幅如实报告。ADR-0022 增补决议 7（spike 推断修正 + 改判 + UX 裁决入册）。
+- **验证**：typecheck 零错误；全量测试（新增 2 钉 T-D1 改判成功/T-D2 真失败双形态，静默结构钉替换确认框钉；18 例既有失败 028 本机环境清单零新增）；真机事件本身即第一份 dogfood 数据：0.10.1 经「重启激活」到位，重启后守卫锚点干净。
+
 ### 0.10.1 修复：0.10.0 真机 E2E 实证缺陷三连——enable 竞速重试普适化 + 回装失败账实复读 + 守卫命中一律两步化
 
 - **需求（2026-10-17，0.10.0 装机当日 E2E 实证，真机 skip-auth@0.4.1 与卸载→重装两个事件）**：①插件树重载窗口的 enable 阶段激活竞速（`pending (waiting for service: webRuntime)`）会让两步升级的第二腿、兜底回装腿与 D3 自升级通道直接终态失败——0.9.94 时代的「enable 失败自动重试一次（重试即愈）」本地增强只覆盖了首腿；②回装腿报失败 ≠ 真缺席——pnpm 可能已写入账面（激活阶段失败），此时建议「手动重装旧版」会误导用户降级；③卸载后同会话重装：宿主活跃态/manifest 字面仍视其在装（守卫命中），而 previousVersion 探测口径为「未安装」，0.10.0 的 previousVersion 前置门使守卫命中原样透传 already-installed。
@@ -672,6 +678,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.2 — account-reality reconciliation for D3 self-upgrade post-write pseudo-failure + silent self-upgrade (first D3 dogfood round)
+
+- **Need (2026-10-18 early morning, first real-machine D3 dogfood — the 0.10.0→0.10.1 self-upgrade event)**: the self-upgrade reported failure (`application=failed、error=already-installed`) while all three ledgers (manifest/node_modules/lock) had already been written to 0.10.1 — the host has a **post-write pseudo-failure** for its own bundle swap: installBundle writes through, the manifest then contains the name, and the host's completion path trips its own guard (self-referential artifact; the guard's `specPackageName` resolves package names from tarball URLs too). Separately: the 0.10.1 self-upgrade confirmation dialog broke the existing "click to upgrade" experience (owner ordered its removal).
+- **Approach**: ① **reconcile on any D3 terminal failure** — re-read listInstalled: if the target version is already written, the upgrade factually happened and the result is re-judged as success (needsRestart=true prompting the activating restart, with the reconciliation noted in output); if the target is absent, the genuine-failure semantics stand; profileDir is threaded from host-api and both seams. ② **silent self-upgrade** — the confirmation dialog is removed wholesale (controlled state / modal / copy keys / SSR pin); the chip click upgrades directly and outcomes are still reported truthfully via banners. ADR-0022 decision 7 records the spike-inference correction, the reconciliation, and the UX ruling.
+- **Verification**: typecheck clean; full suite (2 new pins T-D1 reconciled-success / T-D2 genuine-failure, silent structure pins replacing the confirmation pins; 18 pre-existing failures are the 028 machine-environment set, zero new); the real-machine event itself is the first dogfood datum: 0.10.1 landed via "restart to activate", guard journal anchors clean after restart.
 
 ### Fixes in 0.10.1 — three defects proven by same-day real-machine E2E of 0.10.0: enable-race retry universalized + account-reality re-read on rollback failure + guard hit always two-steps
 
