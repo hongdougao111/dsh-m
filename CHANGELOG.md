@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.6 修复：恢复对账与开机对账匹配放宽为「已到或已超过」（rc-aware）——滞后记录收口
+
+- **需求（2026-10-18，0.10.5 dogfood 收尾盘点挂账）**：0.10.5 真机事件——0.10.3→0.10.4 的中断残留记录（toVersion 0.10.4）在 0.10.5 已激活后才被恢复对账扫到，但匹配用严格相等（实装 0.10.5 ≠ 记录 0.10.4）不命中，残留反复打扰；且横幅补报的 to 引用记录自身的历史目标（0.10.4），与实际装机版（0.10.5）错位。
+- **方案**：① 新增 `reachedVersion(installed, target)`（rc-aware 语义化 ≥ 比较，pure，operations.js 导出）——恢复对账匹配放宽为「installed 已到或已超过 meta.toVersion」；命中时 meta.toVersion 落为实装版（补报文案数据源不再滞后）。② host-api 开机对账同款放宽（`isNewerVersion` rc-aware）：实装 ≥ intent 目标即收口 ok。③ reachedVersion 导出 + 单测（相等/超过/落后/预发布序/非法形态五组）。
+- **验证**：typecheck 零错误；全量 1612 例（新增 7：reachedVersion 纯函数五组 + 恢复对账滞后收口 + 开机对账放宽命中；18 例既有失败 028 清单零新增）。
+
 ### 0.10.5 修复：恢复对账横幅文案键缺失（裸键名 toast）+ i18n 完整性审计测试固化
 
 - **需求（2026-10-18，0.10.4 真机 dogfood）**：0.10.3→0.10.4 自升级重启后，开面板 toast 显示裸键名 `upgrade.reconciled.done` 数秒——恢复对账横幅的文案键漏定义（lookup 回落键名本身）；该类缺陷此前无测试覆盖（带参 lookup 调用不在既有源锚内）。
@@ -697,6 +703,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.6 — restore-reconciliation and boot-reconciliation match relaxed to "reached or passed" (rc-aware) — lagging records closed out
+
+- **Need (2026-10-18, pending item from the 0.10.5 dogfood wrap-up)**: real-machine event — the interrupted leftover of the 0.10.3→0.10.4 upgrade (meta.toVersion 0.10.4) was only swept by the restore reconciliation after 0.10.5 had been activated, but the match used strict equality (installed 0.10.5 ≠ recorded 0.10.4) so it never hit, and the leftover kept nagging; meanwhile the banner's `to` referenced the record's own historical target (0.10.4), misaligned with the actually installed version (0.10.5).
+- **Approach**: ① new `reachedVersion(installed, target)` (rc-aware semantic ≥ comparison, pure, exported from operations.js) — the restore-reconciliation match relaxed to "installed has reached or passed meta.toVersion"; on a hit, meta.toVersion is set to the actually installed version (the banner's copy source no longer lags). ② the host-api boot reconciliation relaxed the same way (`isNewerVersion`, rc-aware): installed ≥ intent target closes out as ok. ③ reachedVersion exported + unit tests (equal/newer/older/prerelease ordering/invalid shapes — five groups).
+- **Verification**: typecheck clean; full suite 1612 tests (7 new: five reachedVersion groups + restore-reconciliation lagging close-out + boot-reconciliation relaxed hit; 18 pre-existing failures are the 028 machine-environment set, zero new).
 
 ### Fixes in 0.10.5 — missing restore-reconciliation banner copy key (raw-key toast) + i18n completeness audit test
 
