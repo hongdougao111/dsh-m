@@ -4,13 +4,16 @@
  * 一条命令跑完 know-how 031/018 检查单的机器可判部分：
  *   1. 版本三处一致：package.json ≡ lock 根两字段；
  *   2. CHANGELOG 双语顶条均含该版本号（顶条版本号此前是人工核对项，现门禁化）；
- *   3. 本地 tag v<version> 存在且指向 HEAD（0.9.94 实录教训：tag 未建先 push 报 refspec 错）。
+ *   3. 本地 tag v<version> 存在且指向 HEAD（0.9.94 实录教训：tag 未建先 push 报 refspec 错）；
+ *   4. 发布物断言（0.10.7 接线 assert-pack）：pack --dry-run 清单齐备、DESIGN/CHANGELOG 不回潜。
  * 用法：bump 版本 → 建 tag → `npm run check-release` → push。任一项不符 exit 1。
  */
 import { readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { packIssues, extractPackFiles } from './assert-pack.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -49,6 +52,17 @@ check(
   tagHead === head,
   tagHead === '' ? '本地无此 tag——先 git tag 再 push' : tagHead === head ? 'tag = HEAD' : `tag 指向 ${tagHead.slice(0, 8)} ≠ HEAD ${head.slice(0, 8)}`,
 )
+
+// 0.10.7：发布物断言接线（assert-pack 同一份规则）——pack --dry-run（含 prepare 构建，~40s）
+try {
+  const packOut = execSync('npm pack --dry-run --json', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const files = extractPackFiles(packOut)
+  if (!files) throw new Error('pack 输出缺少 files 数组')
+  const issues = packIssues(files)
+  check(`发布物清单（${files.length} 文件；DESIGN/CHANGELOG 移出 + 运行时齐备）`, issues.length === 0, issues.join('；'))
+} catch (err) {
+  check('发布物清单断言', false, String(err?.message ?? err))
+}
 
 if (fails.length > 0) {
   console.error(`\n发版门禁未过（${fails.length} 项）：${fails.join('；')}`)
