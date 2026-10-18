@@ -12,9 +12,10 @@
  * - CLI 无 loader 形态：enabled 从「在 bundles 且其补丁行无 disabled 覆盖」推断，
  *   phase 恒 null。
  *
- * PROTECTED_MODULES：'dsh-m' 自保护 + 逐字镜像官方 16 项全集（锚点：
- * @deepseek-ai/dsh-plugin-manager@0.1.7-rc.2 lib/index.js 的 protectedModules，
- * L1077-1094）。每次 DSH 升级后 diff 官方名单同步（know-how 008 升级必查口径）。
+ * PROTECTED_MODULES：'dsh-m' 自保护 + 逐字镜像官方全集（锚点：
+ * @deepseek-ai/dsh-plugin-manager@0.2.1-rc.2 lib/index.js 的 protectedModules，
+ * L1273-1291，17 项；0.2.1 新增 @deepseek-ai/dsh-api-remote-access）。
+ * 每次 DSH 升级后 diff 官方名单同步（know-how 008 升级必查口径）。
  */
 import type { LoaderEntry } from './live-plugin.js'
 import type { InstalledPlugin } from './installed.js'
@@ -54,6 +55,7 @@ export const PROTECTED_MODULES: readonly string[] = [
   '@deepseek-ai/dsh-host-plugin-inventory',
   '@deepseek-ai/dsh-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
+  '@deepseek-ai/dsh-api-remote-access',
   '@deepseek-ai/cordis-plugin-timer',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-host-frontend-static',

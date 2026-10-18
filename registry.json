@@ -100,10 +100,10 @@
     {
       "id": "dsh-copilot-auth",
       "name": "DSH Copilot Auth",
-      "description": "内置 Copilot 登录注销页与开箱路由；目录兜底不覆盖定制，桌面版不支持目录刷新。已适配 0.1.7-rc.2 与 0.2.0-rc.1/rc.2。",
+      "description": "内置 Copilot 登录注销页与开箱路由；目录兜底不覆盖定制，桌面版不支持目录刷新。已适配 0.1.7-rc.2、0.2.0-rc.1/rc.2 与 0.2.1-rc.2。",
       "category": "self-dev",
       "tags": ["Copilot", "认证", "模型接入", "工具"],
-      "verified": ["0.1.7-rc.2", "0.2.0-rc.1", "0.2.0-rc.2"],
+      "verified": ["0.1.7-rc.2", "0.2.0-rc.1", "0.2.0-rc.2", "0.2.1-rc.2"],
       "source": "npm",
       "npm": "@inventec/dsh-copilot-auth",
       "github": "iasiv5/dsh-copilot-auth",
