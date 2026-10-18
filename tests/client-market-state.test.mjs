@@ -307,7 +307,8 @@ describe('C3 接线结构锚（收藏批量 stale + fetchPage 零增量守卫）
 
   it('stale 检查批量化（0.9.87 FP2）：单次 market-ids-exist，失败保守全 stale', () => {
     assert.ok(src.includes('api("market-ids-exist", { ids: list.map((f) => f.id) })'), '收藏 stale 检查必须单发批量 market-ids-exist（取代逐收藏 market 扇出）')
-    assert.ok(src.includes('catch {\n          present = new Set();'), 'API 失败 → 空 Set = 全部保守 stale（旧逐条 catch→false 同语义）')
+    // 0.10.7：多行锚改单行锚（CRLF 工作树上含 \n 的锚恒真，028 §4 第 3 项）——catch 臂清空句全仓恰一处
+    assert.equal(src.split('present = new Set();').length - 1, 2, 'API 失败 → 空 Set = 全部保守 stale（let 初始化 + catch 清空恰两处）')
     assert.ok(!src.includes('api("market", { query: fav.id'), '不得回退逐收藏 market 扇出')
   })
   it('fetchPage 零增量守卫：内容等价不提交，loading 照常收口', () => {
