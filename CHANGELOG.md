@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.4 修复：DESIGN.md 移出 npm 发布面 + assert-pack 兼容新旧 npm 顶层形态
+
+- **需求（2026-10-18，主人）**：npm 包 Code 页携带 `docs/DESIGN.md` 设计全文——设计文档属仓库资产，不应进入发布面。
+- **方案**：package.json `files` 摘除 `docs/DESIGN.md`；`assert-pack` 反向断言防回潜（FORBIDDEN_EXACT）；顺手修复 assert-pack 在新版 npm 下的顶层形态兼容（老版裸数组 `[...]` → 新版 `{"<name>": {...}}`，污染扫描与 entry 提取双兼容——该失效为历史遗留，与本次改动无关，但恰是 DESIGN.md 验证路径的拦路石故一并修复）；DESIGN.md §6 自述同步修订。
+- **验证**：`npm pack --dry-run --json | assert-pack` 全绿（53 文件、DESIGN.md 缺席、反向断言在位）；typecheck 零错误；全量测试基线零新增。
+
 ### 0.10.3 修复：操作泵恢复记账对账（挂账 1）+ D3 applied core 直钉（挂账 3）
 
 - **需求（2026-10-18，0.10.2 dogfood 收尾盘点挂账）**：面板随宿主换装重载会打断泵的最后落账，残留的 running 记录被恢复流程一律标「进程重启中断」——0.10.2 自升级事件中升级实际成功（intent ledger resolved ok + 三面账写穿）却被记为失败，审计误导；另：D3 `applied → needsRestart=false` 缺 core 层直接钉（此前仅 client 层间接覆盖，评审挂账 3）。
@@ -684,6 +690,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.4 — DESIGN.md removed from the npm published surface + assert-pack compatible with both old/new npm top-level shapes
+
+- **Need (2026-10-18, owner)**: the npm package's Code page carried the full `docs/DESIGN.md` design document — a repository asset that should not be part of the published surface.
+- **Approach**: `docs/DESIGN.md` removed from the package.json `files` allowlist; `assert-pack` gains a reverse assertion to prevent regression (FORBIDDEN_EXACT); incidentally fixed assert-pack's compatibility with the new npm top-level shape (old bare array `[...]` → new `{"<name>": {...}}`, with both the junk-scan and entry extraction handling either — a pre-existing breakage unrelated to this change that happened to block the DESIGN.md verification path, fixed in the same pass); DESIGN.md §6 self-description amended accordingly.
+- **Verification**: `npm pack --dry-run --json | assert-pack` green (53 files, DESIGN.md absent, reverse assertion in place); typecheck clean; full suite baseline with zero new failures.
 
 ### Fixes in 0.10.3 — operation-pump restore ledger reconciliation (pending item 1) + D3 applied core-level pin (pending item 3)
 

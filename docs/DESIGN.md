@@ -199,7 +199,7 @@ npm 安装 / GitHub 安装 / 升级 / 自升级 / 卸载是**同一个事务模�
 
 - 单包结构；现有 `.github/workflows/publish.yml`（tag `v*` → OIDC trusted publishing）**一字不改**。
 - 发版 = `npm version patch|minor|major && git push --tags`。
-- npm 包 `dsh-m` 的 `files` 覆盖：`lib/`（`host.js` + `client.js` + `cli.js`）、`registry.json`（离线快照）、`cordis.patch.yml`、双语 README 与 `DESIGN.md`；`scripts/assert-pack.mjs` 对 `npm pack --dry-run --json` 做机器断言。
+- npm 包 `dsh-m` 的 `files` 覆盖：`lib/`（`host.js` + `client.js` + `cli.js`）、`registry.json`（离线快照）、`cordis.patch.yml` 与双语 README；`scripts/assert-pack.mjs` 对 `npm pack --dry-run --json` 做机器断言。（0.10.4 起 `DESIGN.md` 移出发布面、仅仓库 `docs/` 留存，`assert-pack` 反向断言防回潜。）
 
 ## 7. 首批收录
 
