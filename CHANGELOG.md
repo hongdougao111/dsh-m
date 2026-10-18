@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.5 修复：恢复对账横幅文案键缺失（裸键名 toast）+ i18n 完整性审计测试固化
+
+- **需求（2026-10-18，0.10.4 真机 dogfood）**：0.10.3→0.10.4 自升级重启后，开面板 toast 显示裸键名 `upgrade.reconciled.done` 数秒——恢复对账横幅的文案键漏定义（lookup 回落键名本身）；该类缺陷此前无测试覆盖（带参 lookup 调用不在既有源锚内）。
+- **方案**：①补双语键 `upgrade.reconciled.done`（恢复对账确认横幅文案）；②新增 `tests/client-i18n.test.mjs` 固化 i18n 完整性审计——main.jsx 全部 `lookup("key")` 直接量（含带参调用；动态前缀键豁免）必须落在字典定义内，防此类回归。
+- **验证**：审计测试修复前恰好只报此一键（全量 178 个直接量键中唯一缺失），修复后全绿；typecheck 零错误；全量测试 028 基线零新增。
+
 ### 0.10.4 修复+特性：发布面瘦身（DESIGN.md/CHANGELOG.md 移出）+ assert-pack 新旧 npm 兼容 + D3 对账改判补横幅
 
 - **需求**：①npm 包 Code 页携带 `docs/DESIGN.md` 与 343 KB 的 `CHANGELOG.md`——仓库/协作资产运行时零消费，不应进入发布面（主人）；②0.10.3 dogfood 挂账：对账改判的成功结局会随面板重载静默（横幅随旧面板一起死亡），需在下次开面板补报。
@@ -691,6 +697,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.5 — missing restore-reconciliation banner copy key (raw-key toast) + i18n completeness audit test
+
+- **Need (2026-10-18, real-machine dogfood of 0.10.4)**: after the 0.10.3→0.10.4 self-upgrade restart, the panel toast showed the raw key `upgrade.reconciled.done` for a few seconds — the restore-reconciliation banner's copy key was never defined (lookup falls back to the key itself); this defect class had no test coverage (parametrized lookup calls were outside the existing source anchors).
+- **Approach**: ① add the bilingual `upgrade.reconciled.done` key (restore-reconciliation confirmation banner copy); ② add `tests/client-i18n.test.mjs` making the i18n completeness audit a permanent test — every `lookup("key")` literal in main.jsx (including parametrized calls; dynamic-prefix keys exempt) must exist in the dictionaries, preventing this regression class.
+- **Verification**: the audit test, before the fix, flagged exactly this one key as the sole miss among 178 literal keys, and went green after; typecheck clean; full suite with zero new failures against the 028 baseline.
 
 ### Fixes + features in 0.10.4 — published-surface slimming (DESIGN.md/CHANGELOG.md removed) + assert-pack old/new npm compatibility + D3 reconciliation completion banner
 
