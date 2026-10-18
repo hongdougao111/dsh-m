@@ -1,6 +1,5 @@
 # dsh-m — Plugin Marketplace for DeepSeek Harness
 
-[![Release](https://img.shields.io/github/v/release/iasiv5/dsh-m?label=Release&sort=semver)](https://github.com/iasiv5/dsh-m/releases)
 [![npm](https://img.shields.io/npm/v/dsh-m?label=npm)](https://www.npmjs.com/package/dsh-m)
 [![Registry Check](https://img.shields.io/github/actions/workflow/status/iasiv5/dsh-m/registry.yml?branch=main&label=Registry%20Check)](https://github.com/iasiv5/dsh-m/actions/workflows/registry.yml)
 [![License](https://img.shields.io/github/license/iasiv5/dsh-m?label=License)](./LICENSE)
