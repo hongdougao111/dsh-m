@@ -466,6 +466,15 @@ describe('restoreRecords 恢复记账对账（0.10.3 挂账 1）', () => {
   })
 })
 
+// ---------- 0.10.4（挂账 1 延伸）：恢复对账改判完成的升级记录补成功横幅 ----------
+describe('恢复对账改判补横幅（0.10.4，main.jsx 源锚）', () => {
+  it('恢复流程消费 reconciledAfterRestart 标记并补完成横幅（0.10.3 事件实证：成功结局会随面板重载静默）', () => {
+    const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+    assert.ok(src.includes('lookup("upgrade.reconciled.done"'), '恢复对账完成横幅锚')
+    assert.ok(src.includes('r.meta.reconciledAfterRestart'), '改判标记消费在')
+  })
+})
+
 describe('恢复所有权语义（R3·N1 修正：session 标记区分泵拥有 vs 崩溃残留）', () => {
   it('端到端：crashed running（无标记）经 restoreRecords→replaceAll 落库为 failed「进程重启中断」', async () => {
     const storage = memStorage()

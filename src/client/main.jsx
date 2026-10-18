@@ -139,6 +139,8 @@ const ZH = {
   "notify.upgraded": "已升级 {pkg}（{from} → {to}）", "notify.upgraded.clientonly": "。纯客户端更新：刷新页面即可生效，无需重启", "notify.upgraded.activationUnknown": "。生效判定未完成：为确保生效请重启 DSH Web", "notify.upgradehint": "（注意：该插件执行了构建脚本）",
   "op.degraded": "升级失败：新版安装未成功，已自动恢复旧版 {restoredTo}——插件当前可用，可稍后重试。",
   "notify.selfupgraded": "dsh-m 已升级（v{from} → v{to}）", "notify.selfupgraded.failed": "dsh-m 升级失败：{err}",
+  "selfupgrade.reconciled.done": "dsh-m 自升级已完成（开机对账确认）：{from} → {to}。",
+  "selfupgrade.reconciled.failed": "dsh-m 自升级未完成（开机对账确认）：目标 {to} 未装机，当前仍为 {current}，可重试。",
   "failed.install": "安装失败：{err}", "failed.uninstall": "卸载失败：{err}", "failed.upgrade": "升级失败：{err}",
   "failed.load": "加载失败：{err}", "failed.read": "读取失败：{err}", "failed.open": "打开市场面板失败:",
   "banner.done": "变更完成，需要重启 DSH Web 后生效。",
@@ -260,6 +262,8 @@ const EN = {
   "notify.upgraded": "Upgraded {pkg} ({from} → {to})", "notify.upgraded.clientonly": ". Client-only update: refresh the page to take effect — no restart needed", "notify.upgraded.activationUnknown": ". Activation classification unavailable: restart DSH Web to ensure the new version is live", "notify.upgradehint": " (note: this plugin ran build scripts)",
   "op.degraded": "Upgrade failed: the new version did not install — rolled back to {restoredTo}. The plugin still works; you can retry later.",
   "notify.selfupgraded": "dsh-m upgraded (v{from} → v{to})", "notify.selfupgraded.failed": "dsh-m upgrade failed: {err}",
+  "selfupgrade.reconciled.done": "dsh-m self-upgrade finished (confirmed by boot reconciliation): {from} → {to}.",
+  "selfupgrade.reconciled.failed": "dsh-m self-upgrade did not complete (confirmed by boot reconciliation): target {to} is not installed — still {current}; you can retry.",
   "failed.install": "Install failed: {err}", "failed.uninstall": "Uninstall failed: {err}", "failed.upgrade": "Upgrade failed: {err}",
   "failed.load": "Load failed: {err}", "failed.read": "Read failed: {err}", "failed.open": "Failed to open the marketplace panel:",
   "banner.done": "Changes applied. Restart DSH Web to take effect.",
@@ -3327,6 +3331,14 @@ function DshmVersionChip({ version, notify, initialCheck, ops }) {
         if (data && typeof data === "object" && typeof data.current === "string") {
           writeSelfCheckCache(typeof window !== "undefined" && window.localStorage ? window.localStorage : null, data);
           setCheck(data);
+          // 0.10.4（0.10.3 dogfood 挂账）：对账改判补横幅——0.10.3 事件实证自指重载会吞掉成功横幅，
+          // 开机对账确认的结局在此补报（host 侧每进程一次 memoize，不重复打扰）
+          const ir = data.intentResolved;
+          if (ir && ir.ok) {
+            notify({ kind: "ok", text: lookup("selfupgrade.reconciled.done", { from: ir.fromVersion ? `v${ir.fromVersion}` : "—", to: `v${ir.installedVersion}` }) });
+          } else if (ir) {
+            notify({ kind: "warn", text: lookup("selfupgrade.reconciled.failed", { to: `v${ir.intentVersion}`, current: `v${version}` }) });
+          }
         }
       })
       .catch(() => {}); // 检查失败静默——「没有新版本」不打扰
@@ -3968,6 +3980,12 @@ function MarketPanel({ onClose }) {
     restoredRef.current = true;
     void (async () => {
       const restored = await restoreRecords(opsStore.list(), stillApplies, installedVersionOf);
+      // 0.10.4（挂账 1 延伸）：恢复对账改判完成的升级记录补成功横幅（0.10.3 事件实证：成功结局会随面板重载静默）
+      for (const r of restored) {
+        if (r.status === "done" && r.meta && r.meta.reconciledAfterRestart) {
+          notify({ kind: "ok", text: lookup("upgrade.reconciled.done", { pkg: r.target, to: `v${r.meta.toVersion}` }) });
+        }
+      }
       opsStore.replaceAll(restored);
       syncOps();
       if (restored.some((r) => r.status === "queued")) {

@@ -355,7 +355,7 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
           // 0.10.0 开机对账（崩溃兜底网，每进程一次）：上进程若死于自升级 promise 悬垂，delegated
           // intent 遗留至此——与本进程实际版本比对收口；本进程内 D3 已就地 resolve 的（或无悬垂）
           // 幂等 no-op。ADR-0018：读写独立 intent ledger，零外部日志。对账自身故障零涟漪。
-          let intentResolved: { ok: boolean; target: string; installedVersion?: string } | undefined
+          let intentResolved: { ok: boolean; target: string; intentVersion: string; fromVersion?: string; installedVersion?: string } | undefined
           if (!selfCheckIntentDone) {
             selfCheckIntentDone = true
             try {
@@ -363,7 +363,14 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
               if (rec && rec.status === 'delegated') {
                 const match = rec.version === ctx.pkg.version
                 await d.resolveUpgradeIntent({ ok: match, installedVersion: match ? ctx.pkg.version : undefined })
-                intentResolved = { ok: match, target: rec.target, ...(match ? { installedVersion: ctx.pkg.version } : {}) }
+                intentResolved = {
+                  ok: match,
+                  target: rec.target,
+                  // 0.10.4：intentVersion/fromVersion 透出——client 据此补「对账确认」横幅（成功/未完成双形态）
+                  intentVersion: rec.version,
+                  ...(rec.fromVersion !== undefined ? { fromVersion: rec.fromVersion } : {}),
+                  ...(match ? { installedVersion: ctx.pkg.version } : {}),
+                }
               }
             } catch {
               // delegated 残留下次进程再收口；绝不阻塞 self-check

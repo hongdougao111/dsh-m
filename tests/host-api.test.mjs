@@ -590,6 +590,9 @@ describe('host-api：method 响应', () => {
     assert.equal(res.body.intentResolved?.ok, true)
     assert.equal(res.body.intentResolved?.target, 'dsh-m')
     assert.equal(res.body.intentResolved?.installedVersion, '0.0.0-test')
+    // 0.10.4：intentVersion / fromVersion 透出——client 据此补「对账确认」横幅（成功形态 from→to 数据源）
+    assert.equal(res.body.intentResolved?.intentVersion, '0.0.0-test')
+    assert.equal(res.body.intentResolved?.fromVersion, '0.9.94')
     const rec = await readUpgradeIntent()
     assert.equal(rec?.status, 'resolved')
     assert.equal(rec?.outcome, 'ok')
@@ -610,6 +613,8 @@ describe('host-api：method 响应', () => {
     assert.equal(res.body.intentResolved?.ok, false)
     assert.equal(res.body.intentResolved?.target, 'dsh-m')
     assert.equal(res.body.intentResolved?.installedVersion, undefined)
+    // 0.10.4：intentVersion 透出（未完成横幅的 to 数据源）
+    assert.equal(res.body.intentResolved?.intentVersion, '0.9.94')
     const rec = await readUpgradeIntent()
     assert.equal(rec?.status, 'resolved')
     assert.equal(rec?.outcome, 'failed')

@@ -172,3 +172,20 @@ describe('0.10.2 静默自升级（结构序钉；0.10.1 确认框按主人体�
     assert.ok(!body.includes('needsRestart: true'), '升级臂内不得残留硬编码 needsRestart: true（单行锚，CRLF 免疫）')
   })
 })
+
+// ---------- 0.10.4（0.10.3 dogfood 挂账）：对账改判补横幅——成功/未完成都不再随面板重载静默 ----------
+describe('0.10.4 对账改判补横幅（结构钉 + 文案键双字典）', () => {
+  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+  const count = (needle) => src.split(needle).length - 1
+
+  it('① chip self-check 消费 intentResolved：ok → 成功横幅；未完成 → warn 横幅（单行锚）', () => {
+    assert.ok(src.includes('const ir = data.intentResolved;'), 'intentResolved 消费在')
+    assert.ok(src.includes('lookup("selfupgrade.reconciled.done"'), '成功补横幅锚')
+    assert.ok(src.includes('lookup("selfupgrade.reconciled.failed"'), '未完成 warn 横幅锚')
+  })
+
+  it('② done/failed 两键双语各一枚（zh/en）', () => {
+    assert.equal(count('"selfupgrade.reconciled.done": "'), 2)
+    assert.equal(count('"selfupgrade.reconciled.failed": "'), 2)
+  })
+})

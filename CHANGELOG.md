@@ -8,11 +8,11 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
-### 0.10.4 修复：DESIGN.md 与 CHANGELOG.md 移出 npm 发布面 + assert-pack 兼容新旧 npm 顶层形态
+### 0.10.4 修复+特性：发布面瘦身（DESIGN.md/CHANGELOG.md 移出）+ assert-pack 新旧 npm 兼容 + D3 对账改判补横幅
 
-- **需求（2026-10-18，主人）**：npm 包 Code 页携带 `docs/DESIGN.md` 设计全文与 343 KB 的 `CHANGELOG.md`（占 tarball 约 76%）——两者均属仓库/协作资产，运行时零消费，不应进入发布面。
-- **方案**：package.json `files` 摘除 `docs/DESIGN.md` 与 `CHANGELOG.md`（tarball 实测 450 KB → 303 KB，−33%）；`assert-pack` 反向断言防回潜（FORBIDDEN_EXACT）；顺手修复 assert-pack 在新版 npm 下的顶层形态兼容（老版裸数组 `[...]` → 新版 `{"<name>": {...}}`，污染扫描与 entry 提取双兼容——该失效为历史遗留，与本次改动无关，但恰是验证路径的拦路石故一并修复）；DESIGN.md §6 自述同步修订。CHANGELOG 在仓库根目录照常维护（双语、发布门禁 031 核验不受影响），线上阅读走 GitHub。
-- **验证**：`npm pack --dry-run --json | assert-pack` 全绿（52 文件、双文档缺席、反向断言在位）；tarball 303,403 B（原 449,978 B）；typecheck 零错误；全量测试基线零新增。
+- **需求**：①npm 包 Code 页携带 `docs/DESIGN.md` 与 343 KB 的 `CHANGELOG.md`——仓库/协作资产运行时零消费，不应进入发布面（主人）；②0.10.3 dogfood 挂账：对账改判的成功结局会随面板重载静默（横幅随旧面板一起死亡），需在下次开面板补报。
+- **方案**：①package.json `files` 摘除两文档（tarball 实测 450 KB → 303 KB，−33%）；assert-pack 反向断言防回潜 + 顺手修复新版 npm 顶层形态兼容（老版裸数组 `[...]` → 新版 `{"<name>": {...}}`）；DESIGN.md §6 自述同步。②host-api self-check 对账 payload 增 `intentVersion`/`fromVersion` 透出；chip 消费 `intentResolved` 补横幅（成功 → 「自升级已完成（开机对账确认）」、未完成 → warn「目标未装机可重试」）；恢复流程对改判完成的升级记录（meta.reconciledAfterRestart）补成功横幅。
+- **验证**：`npm pack --dry-run --json | assert-pack` 全绿（52 文件、双文档缺席、反向断言在位）；typecheck 零错误；全量测试（新增钉：恢复对账三形态、三站点 toVersion 锚、对账横幅结构/文案键、T-D3 applied core 直钉；18 例既有失败 028 清单零新增）。
 
 ### 0.10.3 修复：操作泵恢复记账对账（挂账 1）+ D3 applied core 直钉（挂账 3）
 
@@ -691,11 +691,11 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## English
 
-### Fixes in 0.10.4 — DESIGN.md and CHANGELOG.md removed from the npm published surface + assert-pack compatible with both old/new npm top-level shapes
+### Fixes + features in 0.10.4 — published-surface slimming (DESIGN.md/CHANGELOG.md removed) + assert-pack old/new npm compatibility + D3 reconciliation completion banner
 
-- **Need (2026-10-18, owner)**: the npm package's Code page carried the full `docs/DESIGN.md` design document and the 343 KB `CHANGELOG.md` (≈76% of the tarball) — both are repository/collaboration assets with zero runtime consumers and should not be part of the published surface.
-- **Approach**: `docs/DESIGN.md` and `CHANGELOG.md` removed from the package.json `files` allowlist (tarball measured 450 KB → 303 KB, −33%); `assert-pack` gains a reverse assertion to prevent regression (FORBIDDEN_EXACT); incidentally fixed assert-pack's compatibility with the new npm top-level shape (old bare array `[...]` → new `{"<name>": {...}}`, with both the junk-scan and entry extraction handling either — a pre-existing breakage unrelated to this change that happened to block the verification path, fixed in the same pass); DESIGN.md §6 self-description amended accordingly. CHANGELOG keeps living at the repository root as usual (bilingual, release-gate checks unaffected); read it online via GitHub.
-- **Verification**: `npm pack --dry-run --json | assert-pack` green (52 files, both documents absent, reverse assertion in place); tarball 303,403 B (was 449,978 B); typecheck clean; full suite baseline with zero new failures.
+- **Need**: ① the npm package's Code page carried the full `docs/DESIGN.md` design document and the 343 KB `CHANGELOG.md` (≈76% of the tarball) — repository/collaboration assets with zero runtime consumers that should not be on the published surface (owner); ② 0.10.3 dogfood pending item: a reconciled self-upgrade success is silent (the banner dies with the old panel during the host's own reload) and must be re-reported on the next panel open.
+- **Approach**: ① both documents removed from the package.json `files` allowlist (tarball measured 450 KB → 303 KB, −33%); assert-pack gains a reverse assertion against regression + incidental compatibility fix for the new npm top-level shape (old bare array `[...]` → new `{"<name>": {...}}`); DESIGN.md §6 self-description amended. ② the host-api self-check reconciliation payload now surfaces `intentVersion`/`fromVersion`; the chip consumes `intentResolved` to raise the completion banner (ok → "self-upgrade finished (confirmed by boot reconciliation)", not-completed → warn "target not installed, retry available"); the restore flow raises a success banner for upgrade records re-judged as done (meta.reconciledAfterRestart).
+- **Verification**: `npm pack --dry-run --json | assert-pack` green (52 files, both documents absent, reverse assertion in place); typecheck clean; full suite (new pins: three restore-reconciliation shapes, three site toVersion anchors, reconciliation banner structure/copy keys, T-D3 applied core-level pin; 18 pre-existing failures are the 028 machine-environment set, zero new).
 
 ### Fixes in 0.10.3 — operation-pump restore ledger reconciliation (pending item 1) + D3 applied core-level pin (pending item 3)
 
