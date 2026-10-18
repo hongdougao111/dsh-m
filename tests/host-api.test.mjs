@@ -620,6 +620,21 @@ describe('host-api：method 响应', () => {
     assert.equal(rec?.outcome, 'failed')
   })
 
+  it('0.10.6 对账④：intent 目标低于实装（0.0.0-aaa < 0.0.0-test）→ ≥ 放宽命中 → ok=true（滞后记录收口）', async () => {
+    await writeUpgradeIntent({ target: 'dsh-m', version: '0.0.0-aaa', at: 1_000 })
+    const { dispatcher } = setup({
+      readUpgradeIntent: readUpgradeIntent,
+      resolveUpgradeIntent: resolveUpgradeIntent,
+    })
+    const res = await callApi(dispatcher, { headers: JSON_HEADERS, body: { method: 'self-check' } })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.intentResolved?.ok, true)
+    assert.equal(res.body.intentResolved?.installedVersion, '0.0.0-test')
+    const rec = await readUpgradeIntent()
+    assert.equal(rec?.status, 'resolved')
+    assert.equal(rec?.outcome, 'ok')
+  })
+
   it('未预期异常 → 500 且不泄露堆栈', async () => {
     const { dispatcher } = setup({
       listMarket: async () => {

@@ -240,13 +240,55 @@ export function createOperationsStore(storage) {
 }
 
 /**
+ * 0.10.6（挂账 1 收口）：installed 是否已达 target（rc-aware 语义化 ≥ 比较，pure）。
+ * core 三段数值比较；同 core 下无预发布 > 有预发布，预发布段逐段（数值段按数值、标识符按字典序）。
+ * 非法/不可解析 → false（对账读不到就不收口，保持原语义）。
+ */
+export function reachedVersion(installed, target) {
+  if (typeof installed !== 'string' || typeof target !== 'string') return false
+  const parse = (v) => {
+    const m = /^(.*?)-([\s\S]+)$/.exec(v)
+    const corePart = m ? m[1] : v
+    const seg = corePart.split('.')
+    if (seg.length !== 3 || seg.some((n) => !/^\d+$/.test(n))) return null
+    return { core: seg.map((n) => Number.parseInt(n, 10)), pre: m ? m[2].split('.') : null }
+  }
+  const a = parse(installed)
+  const b = parse(target)
+  if (!a || !b) return false
+  for (let i = 0; i < 3; i++) {
+    if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i]
+  }
+  if (a.pre === null && b.pre === null) return true
+  if (a.pre === null) return true
+  if (b.pre === null) return false
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
+    const x = a.pre[i]
+    const y = b.pre[i]
+    if (x === undefined) return true
+    if (y === undefined) return false
+    const xn = /^\d+$/.test(x)
+    const yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const c = Number(x) - Number(y)
+      if (c !== 0) return c > 0
+    } else if (xn !== yn) {
+      return xn
+    } else if (x !== y) {
+      return x > y
+    }
+  }
+  return true
+}
+
+/**
  * 恢复校验（必须在 installed 数据 resolve 之后调用——数据未到位时等待而非默认判定）：
  * @param {OperationRecord[]} records
  * @param {(rec: OperationRecord) => Promise<boolean>} stillApplies 前提判定（调用方以实读数据实现）
  * @param {(rec: OperationRecord) => Promise<string|undefined>} [installedVersionOf]
  *   0.10.3 挂账 1：中断升级的账实复读缝——返回 rec.target 的实装版本（未知/缺席 = undefined）。
- *   升级类 running 残留若账面已到 meta.toVersion（post-write 伪失败 + 面板随宿主换装重载打断落账），
- *   改判 done（meta.reconciledAfterRestart 留痕）；否则保持「进程重启中断」原语义。
+ *   0.10.6 匹配放宽：升级类 running 残留若账面「已到或已超过」meta.toVersion（reachedVersion），
+ *   改判 done（meta.reconciledAfterRestart 留痕、toVersion 落为实装版）；否则保持「进程重启中断」原语义。
  * @returns {Promise<OperationRecord[]>} 改标后的记录列表（不落库；由调用方 replaceAll）
  */
 export async function restoreRecords(records, stillApplies, installedVersionOf) {
@@ -289,12 +331,14 @@ export async function restoreRecords(records, stillApplies, installedVersionOf) 
         } catch {
           installed = undefined
         }
-        if (installed === rec.meta.toVersion) {
+        // 0.10.6（0.10.5 dogfood 实证）：匹配放宽为「已到或已超过」（reachedVersion，rc-aware ≥）——
+        // 跨版本滞后记录也能收口；meta.toVersion 落为实装版——补报文案数据源不再显示滞后值。
+        if (installed !== undefined && reachedVersion(installed, rec.meta.toVersion)) {
           out.push({
             ...rec,
             status: 'done',
             error: undefined,
-            meta: { ...rec.meta, reconciledAfterRestart: true },
+            meta: { ...rec.meta, toVersion: installed, reconciledAfterRestart: true },
             updatedAt: Date.now(),
           })
           continue

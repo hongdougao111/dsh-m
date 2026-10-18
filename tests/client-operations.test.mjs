@@ -7,7 +7,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
+import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, reachedVersion, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
 import { groupOpsByDay } from '../src/client/operations-view.js'
 
 /** localStorage mock（可注入故障）。 */
@@ -463,6 +463,39 @@ describe('restoreRecords 恢复记账对账（0.10.3 挂账 1）', () => {
     assert.equal(nonUpgrade[0].status, 'failed')
     const legacy = await restoreRecords([running()], ivo('2.0.0'))
     assert.equal(legacy[0].status, 'failed', '不传第三参 = 原行为（既有调用方零迁移）')
+  })
+})
+
+// ---------- 0.10.6（0.10.5 dogfood 实证）：对账匹配放宽为「已到或已超过」+ 补报文案用实装版 ----------
+
+describe('reachedVersion（0.10.6：rc-aware 语义化 ≥ 比较，pure）', () => {
+  it('相等 / core 更大 → true；core 更小 → false', () => {
+    assert.equal(reachedVersion('0.10.4', '0.10.4'), true)
+    assert.equal(reachedVersion('0.10.5', '0.10.4'), true)
+    assert.equal(reachedVersion('0.10.4', '0.10.5'), false)
+    assert.equal(reachedVersion('1.0.0', '0.9.9'), true)
+  })
+  it('预发布序：同 core 下 rc.2 ≥ rc.1；无预发布 ≥ 有预发布；有预发布 < 无预发布', () => {
+    assert.equal(reachedVersion('0.2.1-rc.2', '0.2.1-rc.1'), true)
+    assert.equal(reachedVersion('0.2.1-rc.1', '0.2.1-rc.2'), false)
+    assert.equal(reachedVersion('0.2.1', '0.2.1-rc.2'), true)
+    assert.equal(reachedVersion('0.2.1-rc.2', '0.2.1'), false)
+  })
+  it('非法形态 → false（不抛）', () => {
+    assert.equal(reachedVersion('junk', '0.10.4'), false)
+    assert.equal(reachedVersion('0.10.4', 'junk'), false)
+    assert.equal(reachedVersion(undefined, '0.10.4'), false)
+  })
+})
+
+describe('restoreRecords 对账匹配放宽（0.10.6 挂账 1 收口）', () => {
+  const running = (over = {}) => rec({ id: 'r1', kind: 'upgrade', target: 'pkg-a', status: 'running', meta: { toVersion: '0.10.4' }, ...over })
+  const ivo = (v) => async () => v
+  it('④ 账面已「超过」目标版（0.10.5 > 记录 0.10.4）→ 改判 done 且 meta.toVersion 落实装版（补报不显示滞后值）', async () => {
+    const out = await restoreRecords([running()], ivo('2.0.0'), ivo('0.10.5'))
+    assert.equal(out[0].status, 'done', '滞后记录收口（不再反复打扰）')
+    assert.equal(out[0].meta.toVersion, '0.10.5', '补报文案数据源 = 实装版')
+    assert.equal(out[0].meta.reconciledAfterRestart, true)
   })
 })
 

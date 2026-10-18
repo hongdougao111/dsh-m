@@ -361,7 +361,9 @@ export function createApiDispatcher(ctx: HostApiContext): (req: IncomingMessage,
             try {
               const rec = await d.readUpgradeIntent()
               if (rec && rec.status === 'delegated') {
-                const match = rec.version === ctx.pkg.version
+                // 0.10.6：匹配放宽为「已到或已超过」（实装 ≥ intent 目标，isNewerVersion rc-aware）——
+                // 跨版本滞后记录也能收口，不再反复打扰
+                const match = rec.version === ctx.pkg.version || isNewerVersion(ctx.pkg.version, rec.version)
                 await d.resolveUpgradeIntent({ ok: match, installedVersion: match ? ctx.pkg.version : undefined })
                 intentResolved = {
                   ok: match,
