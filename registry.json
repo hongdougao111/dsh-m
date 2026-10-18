@@ -137,7 +137,7 @@
     {
       "id": "dsh-obmc-web",
       "name": "DSH OBMC Web",
-      "description": "DSH 内打开 OpenBMC 控制台：同源 SSH 隧道代理，设置页一键开启，IP 探测与隧道重定向；需 SSH 跳板可达 BMC。版本无关。",
+      "description": "DSH 内打开 OpenBMC 控制台：同源 SSH 隧道代理，设置页一键开启，IP 探测与隧道重定向；需 SSH 跳板可达 BMC。0.1.x≤0.2.0 版本无关；DSH 0.2.1-rc.x 需 ≥0.1.4（webRuntime→webStartup）。",
       "category": "self-dev",
       "tags": ["OpenBMC", "远程管理", "SSH 隧道", "KVM"],
       "decoupled": true,
