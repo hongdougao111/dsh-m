@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.7 修复：对账补横幅一次性化（独立已读集合 + 先落账后补报）+ 0.10.6 retro 工程基建
+
+- **需求（2026-10-18，主人）**：0.10.5→0.10.6 升级后，恢复对账完成横幅**每次开面板都弹**（「已到 v0.10.6」）——按 0.10.4 引入时「成功结局不该静默」的本意它应只提醒一次；每开必弹的根因（done 落账被真机复活路径打回 running）未定谳（本地测试不可复现）。
+- **方案**：①**A 方案（主人裁决，ADR-0022 决策 8）**：已读集合存独立 localStorage 键 `dshm-reconcile-notified`（成员 `id|target|toVersion` 元组），在记录生命周期之外、对复活机制鲁棒；②时序反转：先 `replaceAll` 落账、成功后才补横幅——persist 抛错静默放弃该次提醒并留 console.error 诊断（丢失一次提醒 < 重复轰炸）；③失败/未完成 warn 横幅不去重（host-api memoize 已天然限频）——非对称 notify：成功提醒一次，失败必须响；④复活机制独立挂账排查，不阻塞本次。
+- **附带（0.10.6 retro 四笔，已先行上 main）**：源锚卫生守卫（CRLF×多行锚恒真类机械防护 + C3 存量锚修复）；i18n 审计扩面至 op-outcome.js；assert-pack 接线发版门禁（第 7 项检查）；`scripts/release.mjs` 发布编排（`npm run release`）；CODING-STANDARDS 锚纪律第三条 + describe helpers 评审项；know-how AGENTS.md GITHUB_TOKEN 提示。
+- **验证**：typecheck 零错误；全量 1620 例（新增：已读集合容错四态 + roundtrip + 时序反转/诊断/接线源锚；C3 转绿后既有失败降至 17 = 028 清单减 C3）。
+
 ### 0.10.6 修复：恢复对账与开机对账匹配放宽为「已到或已超过」（rc-aware）——滞后记录收口
 
 - **需求（2026-10-18，0.10.5 dogfood 收尾盘点挂账）**：0.10.5 真机事件——0.10.3→0.10.4 的中断残留记录（toVersion 0.10.4）在 0.10.5 已激活后才被恢复对账扫到，但匹配用严格相等（实装 0.10.5 ≠ 记录 0.10.4）不命中，残留反复打扰；且横幅补报的 to 引用记录自身的历史目标（0.10.4），与实际装机版（0.10.5）错位。
@@ -703,6 +710,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.7 — reconciliation completion banner deduplicated once (independent seen-set + persist-before-notify) + 0.10.6 retro engineering groundwork
+
+- **Need (2026-10-18, owner)**: after the 0.10.5→0.10.6 upgrade, the restore-reconciliation completion banner popped on **every panel open** ("now at v0.10.6") — by its 0.10.4 charter ("a success must not be silent") it should notify once; the every-open root cause (the done write-through being knocked back to running by a resurrection path on the real machine) remains undiagnosed (not reproducible in local tests).
+- **Approach**: ① **Plan A (owner ruling, ADR-0022 decision 8)**: the seen-set lives in an independent localStorage key `dshm-reconcile-notified` (members are `id|target|toVersion` tuples) — outside the record's lifecycle, robust to the resurrection path; ② order reversed: `replaceAll` persists first and only a successful persist notifies — a persist throw silently forfeits that one notification and leaves a console.error diagnostic (losing one reminder beats repeated bombardment); ③ the failure/not-completed warn banner is not deduplicated (host-api memoization already rate-limits it per process) — asymmetric notify: success notifies once, failure must sound; ④ the resurrection mechanism is a separately tracked hunt, not blocking this release.
+- **Also in this release (the four 0.10.6 retro commits, already on main)**: source-anchor hygiene guard (mechanical guard against the CRLF×multi-line-needle always-true class + the C3 legacy anchor fixed); i18n audit extended to op-outcome.js; assert-pack wired into the release gate (7th check); `scripts/release.mjs` release orchestration (`npm run release`); CODING-STANDARDS anchor-discipline third fact + describe-helpers review item; know-how AGENTS.md GITHUB_TOKEN hint.
+- **Verification**: typecheck clean; full suite 1620 tests (new: seen-set tolerance quadruple + roundtrip + order-reversal/diagnostic/wiring source anchors; pre-existing failures dropped to 17 = the 028 set minus C3, which is now green).
 
 ### Fixes in 0.10.6 — restore-reconciliation and boot-reconciliation match relaxed to "reached or passed" (rc-aware) — lagging records closed out
 
