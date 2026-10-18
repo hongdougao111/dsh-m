@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.3 修复：操作泵恢复记账对账（挂账 1）+ D3 applied core 直钉（挂账 3）
+
+- **需求（2026-10-18，0.10.2 dogfood 收尾盘点挂账）**：面板随宿主换装重载会打断泵的最后落账，残留的 running 记录被恢复流程一律标「进程重启中断」——0.10.2 自升级事件中升级实际成功（intent ledger resolved ok + 三面账写穿）却被记为失败，审计误导；另：D3 `applied → needsRestart=false` 缺 core 层直接钉（此前仅 client 层间接覆盖，评审挂账 3）。
+- **方案**：① `restoreRecords` 增第三参 `installedVersionOf`（账实复读缝，main.jsx 以 `api("installed")` 实读实现，与 stillApplies 同款实读纪律）——升级类 running 残留若账面已到 `meta.toVersion` → 改判 done（`meta.reconciledAfterRestart` 留痕）；未到目标保持中断原语义；不传第三参行为不变（既有调用方零迁移）。② 三处升级站点 enqueue meta 携带 `toVersion`（chip=state.latest、已装列表=it.latestVersion、市场卡=it.latest）——中断恢复对账的比对依据。
+- **验证**：typecheck 零错误；全量测试（新增 6：T-D3 applied core 直钉 + 恢复对账改判/未到/向后兼容三形态 + 三站点 meta 单行锚；18 例既有失败 028 本机环境清单零新增）。
+
 ### 0.10.2 修复：D3 自升级 post-write 伪失败账实改判 + 静默自升级（0.10.0→0.10.1 dogfood 实证轮）
 
 - **需求（2026-10-18 凌晨，首次 D3 真机 dogfood——0.10.0→0.10.1 自升级事件）**：自升级报失败（`application=failed、error=already-installed`）但三面账（manifest/node_modules/lock）均已写入 0.10.1——宿主对自身 bundle 换装存在 **post-write 伪失败**：installBundle 写穿后 manifest 含该名，宿主完成路径自触守卫（自指操作伪影；守卫源码 `specPackageName` 对 tarball URL 同样可解析包名）。另：0.10.1 引入的自升级确认框破坏既有「点击即升级」体验（主人裁决撤除）。
@@ -678,6 +684,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fixes in 0.10.3 — operation-pump restore ledger reconciliation (pending item 1) + D3 applied core-level pin (pending item 3)
+
+- **Need (2026-10-18, pending items from the 0.10.2 dogfood wrap-up)**: a panel reload during the host's own bundle swap interrupts the pump's final ledger write, and the leftover running record is unconditionally labeled「进程重启中断」(process-restart interrupted) by the restore flow — in the 0.10.2 self-upgrade event the upgrade had actually succeeded (intent ledger resolved ok + all three ledgers written through) yet was recorded as failed, misleading the audit trail. Separately: D3 `applied → needsRestart=false` lacked a core-level pin (previously covered only indirectly at the client layer; review pending item 3).
+- **Approach**: ① `restoreRecords` gains a third parameter `installedVersionOf` (an account-reality re-read seam implemented in main.jsx via `api("installed")`, same live-read discipline as stillApplies) — an upgrade-kind running leftover whose ledger has reached `meta.toVersion` is re-judged as done (`meta.reconciledAfterRestart` recorded); anything else keeps the interrupted semantics; omitting the third parameter preserves the old behavior (zero migration for existing callers). ② the three upgrade sites now carry `toVersion` in the enqueue meta (chip=state.latest, installed list=it.latestVersion, market card=it.latest) — the comparison basis for the restore reconciliation.
+- **Verification**: typecheck clean; full suite (6 new: T-D3 applied core-level pin + three restore-reconciliation shapes + three site meta anchors; 18 pre-existing failures are the 028 machine-environment set, zero new).
 
 ### Fixes in 0.10.2 — account-reality reconciliation for D3 self-upgrade post-write pseudo-failure + silent self-upgrade (first D3 dogfood round)
 
