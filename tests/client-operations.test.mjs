@@ -472,6 +472,8 @@ describe('恢复对账改判补横幅（0.10.4，main.jsx 源锚）', () => {
     const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
     assert.ok(src.includes('lookup("upgrade.reconciled.done"'), '恢复对账完成横幅锚')
     assert.ok(src.includes('r.meta.reconciledAfterRestart'), '改判标记消费在')
+    // 0.10.5：横幅键必须在双字典定义（0.10.4 真机实证漏定义 → 用户看到裸键名 toast）
+    assert.equal(src.split('"upgrade.reconciled.done": "').length - 1, 2, '文案键双语在位（防裸键名回归）')
   })
 })
 
