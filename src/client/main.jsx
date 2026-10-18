@@ -27,7 +27,7 @@ const { pickPayload, parseToolArgs } = require("./tool-view.js");
 const { RESTART_POLL_MS, RESTART_DEADLINE_MS, nextRestartWait, isAmbiguousRestartRequestError } = require("./restart-wait.js");
 const { refreshAfterMutation } = require("./view-refresh.js");
 const { applyInstalledUpdates, installedUpdateStats } = require("./installed-updates.js");
-const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
+const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, readReconcileNotified, writeReconcileNotified, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
 const { groupOpsByDay, opRowVm, opUpgradeMeta, canRemoveRow, channelLabelKey } = require("./operations-view.js");
 const { createFavoritesStore, partitionStale } = require("./favorites.js");
 const { readSelfCheckCache, writeSelfCheckCache, clearSelfCheckCache, deriveChipState } = require("./self-check.js");
@@ -3982,13 +3982,27 @@ function MarketPanel({ onClose }) {
     restoredRef.current = true;
     void (async () => {
       const restored = await restoreRecords(opsStore.list(), stillApplies, installedVersionOf);
-      // 0.10.4（挂账 1 延伸）：恢复对账改判完成的升级记录补成功横幅（0.10.3 事件实证：成功结局会随面板重载静默）
+      // 0.10.7（A 方案·主人裁决）：先落账后补报——persist 抛错则静默放弃该次提醒（丢失一次 < 重复轰炸），
+      // 并留诊断（Q5-a：真机「每开必弹」的复活机制未定谳，此行是它的第一手踪迹）
+      try {
+        opsStore.replaceAll(restored);
+      } catch (err) {
+        console.error("[dsh-m] restore persist failed:", err);
+        return;
+      }
+      // 0.10.7（Q1-b/Q2-a）：对账补横幅一次性化——已读集合存独立 localStorage 键（记录生命周期外），
+      // 键 = id|target|toVersion 元组；命中即跳过（同一条升级只提醒一次，新升级照常提醒）
+      const reconcileStorage = typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+      const seen = readReconcileNotified(reconcileStorage);
       for (const r of restored) {
         if (r.status === "done" && r.meta && r.meta.reconciledAfterRestart) {
+          const key = `${r.id}|${r.target}|${r.meta.toVersion}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          writeReconcileNotified(reconcileStorage, seen);
           notify({ kind: "ok", text: lookup("upgrade.reconciled.done", { pkg: r.target, to: `v${r.meta.toVersion}` }) });
         }
       }
-      opsStore.replaceAll(restored);
       syncOps();
       if (restored.some((r) => r.status === "queued")) {
         void opsPump.kick(); // 洞3：恢复并入前台泵（单一执行路径；drainRestored 循环退役）

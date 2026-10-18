@@ -7,7 +7,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, reachedVersion, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
+import { createOperationsStore, restoreRecords, drainRestored, createOpsPump, opAppliesTo, reachedVersion, readReconcileNotified, writeReconcileNotified, RECONCILE_NOTIFIED_KEY, OP_STORAGE_KEY, upgradeNotify, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } from '../src/client/operations.js'
 import { groupOpsByDay } from '../src/client/operations-view.js'
 
 /** localStorage mock（可注入故障）。 */
@@ -507,6 +507,44 @@ describe('恢复对账改判补横幅（0.10.4，main.jsx 源锚）', () => {
     assert.ok(src.includes('r.meta.reconciledAfterRestart'), '改判标记消费在')
     // 0.10.5：横幅键必须在双字典定义（0.10.4 真机实证漏定义 → 用户看到裸键名 toast）
     assert.equal(src.split('"upgrade.reconciled.done": "').length - 1, 2, '文案键双语在位（防裸键名回归）')
+  })
+})
+
+// ---------- 0.10.7（A 方案，主人裁决）：对账补横幅一次性化——独立已读集合 + 先落账后补报 ----------
+describe('对账补横幅一次性化（0.10.7，main.jsx 源锚 + 已读集合纯函数）', () => {
+  it('① restore 时序反转：replaceAll（落账）先于补横幅 lookup；persist 抛错静默放弃该次补报并留诊断', () => {
+    const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+    const idxReplace = src.indexOf('opsStore.replaceAll(restored);')
+    const idxNotify = src.indexOf('lookup("upgrade.reconciled.done"')
+    assert.ok(idxReplace >= 0 && idxNotify > idxReplace, '先落账后补报（弹的时候账已落）')
+    assert.ok(src.includes('restore persist failed'), 'persist 抛错诊断留痕（Q5-a）')
+  })
+
+  it('② 已读集合接线：读 → has 去重 → add → 写回（独立 localStorage 键，记录生命周期外）', () => {
+    const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+    assert.ok(src.includes('readReconcileNotified('), '读已读集合')
+    assert.ok(src.includes('seen.has(key)'), '去重判在')
+    assert.ok(src.includes('writeReconcileNotified('), '写回已读集合')
+  })
+
+  it('③ readReconcileNotified：缺键/损坏 JSON/非数组 → 空 Set；合法 → Set', () => {
+    const empty = memStorage()
+    assert.deepEqual([...readReconcileNotified(empty)], [], '缺键 → 空 Set')
+    empty.setItem(RECONCILE_NOTIFIED_KEY, '{corrupt')
+    assert.deepEqual([...readReconcileNotified(empty)], [], '损坏 JSON → 空 Set（容错）')
+    empty.setItem(RECONCILE_NOTIFIED_KEY, 'not-an-array')
+    assert.deepEqual([...readReconcileNotified(empty)], [], '非数组 → 空 Set（容错）')
+    empty.setItem(RECONCILE_NOTIFIED_KEY, JSON.stringify(['a|pkg-a|1.0.0', 42, null]))
+    assert.deepEqual([...readReconcileNotified(empty)], ['a|pkg-a|1.0.0'], '合法数组 → 只留字符串成员')
+  })
+
+  it('④ writeReconcileNotified：roundtrip + null storage 零抛（私有模式/配额容错）', () => {
+    const s = memStorage()
+    writeReconcileNotified(s, new Set(['x|t|0.1.0']))
+    assert.deepEqual([...readReconcileNotified(s)], ['x|t|0.1.0'], 'roundtrip')
+    assert.doesNotThrow(() => writeReconcileNotified(null, new Set(['k'])), 'null storage 不抛')
+    assert.doesNotThrow(() => readReconcileNotified(null), 'null storage 读不抛')
+    assert.equal(readReconcileNotified(null).size, 0)
   })
 })
 

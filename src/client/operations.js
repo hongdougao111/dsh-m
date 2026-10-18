@@ -282,6 +282,38 @@ export function reachedVersion(installed, target) {
 }
 
 /**
+ * 0.10.7（对账补横幅一次性化，A 方案·主人裁决）：已读集合的独立存储键。
+ * 集合成员 = `${recordId}|${target}|${toVersion}`（Q2-a 元组：同一条升级只提醒一次，新升级照常提醒）。
+ * 存在操作记录生命周期**之外**（独立 localStorage 键）——对真机实证的「done 落账被复活路径
+ * 打回 running」（0.10.6 每开必弹事件）鲁棒；复活机制未定谳，已挂账排查（CHANGELOG 0.10.7）。
+ */
+export const RECONCILE_NOTIFIED_KEY = 'dshm-reconcile-notified'
+
+/** 读已读集合：缺键/损坏 JSON/非数组 → 空 Set（容错）；storage 缺席 → 空 Set（SSR/探针零操作）。 */
+export function readReconcileNotified(storage) {
+  if (!storage || typeof storage.getItem !== 'function') return new Set()
+  try {
+    const raw = storage.getItem(RECONCILE_NOTIFIED_KEY)
+    if (typeof raw !== 'string' || raw === '') return new Set()
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return new Set()
+    return new Set(arr.filter((k) => typeof k === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+/** 写已读集合：配额/私有模式等异常静默放弃持久化（横幅可能重复一次，不致命）。 */
+export function writeReconcileNotified(storage, keys) {
+  if (!storage || typeof storage.setItem !== 'function') return
+  try {
+    storage.setItem(RECONCILE_NOTIFIED_KEY, JSON.stringify([...keys]))
+  } catch {
+    /* 容错：放弃持久化 */
+  }
+}
+
+/**
  * 恢复校验（必须在 installed 数据 resolve 之后调用——数据未到位时等待而非默认判定）：
  * @param {OperationRecord[]} records
  * @param {(rec: OperationRecord) => Promise<boolean>} stillApplies 前提判定（调用方以实读数据实现）
