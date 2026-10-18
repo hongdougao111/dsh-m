@@ -16,8 +16,8 @@ const REQUIRED = [
   'package.json',
 ]
 
-// 0.10.4：DESIGN.md 移出发布面（仅仓库 docs/ 留存）——FORBIDDEN 精确名单防回潜
-const FORBIDDEN_EXACT = ['docs/DESIGN.md']
+// 0.10.4：DESIGN.md 与 CHANGELOG.md 移出发布面（仓库 docs/ 与根目录留存）——精确名单防回潜
+const FORBIDDEN_EXACT = ['docs/DESIGN.md', 'CHANGELOG.md']
 
 const FORBIDDEN_PREFIXES = ['src/', 'tests/', 'scripts/']
 
@@ -66,4 +66,4 @@ if (missing.length) fail(`缺少运行时文件: ${missing.join(', ')}`)
 const leaked = files.filter((f) => FORBIDDEN_PREFIXES.some((prefix) => f.startsWith(prefix)) || FORBIDDEN_EXACT.includes(f))
 if (leaked.length) fail(`不应打包的文件泄漏: ${leaked.join(', ')}`)
 
-console.log(`✓ assert-pack: ${files.length} 个文件，运行时清单完整（host/client/cli/registry/双语 README；DESIGN.md 自 0.10.4 起移出发布面）`)
+console.log(`✓ assert-pack: ${files.length} 个文件，运行时清单完整（host/client/cli/registry/双语 README；DESIGN.md/CHANGELOG.md 自 0.10.4 起移出发布面）`)
