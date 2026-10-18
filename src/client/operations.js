@@ -243,9 +243,13 @@ export function createOperationsStore(storage) {
  * 恢复校验（必须在 installed 数据 resolve 之后调用——数据未到位时等待而非默认判定）：
  * @param {OperationRecord[]} records
  * @param {(rec: OperationRecord) => Promise<boolean>} stillApplies 前提判定（调用方以实读数据实现）
+ * @param {(rec: OperationRecord) => Promise<string|undefined>} [installedVersionOf]
+ *   0.10.3 挂账 1：中断升级的账实复读缝——返回 rec.target 的实装版本（未知/缺席 = undefined）。
+ *   升级类 running 残留若账面已到 meta.toVersion（post-write 伪失败 + 面板随宿主换装重载打断落账），
+ *   改判 done（meta.reconciledAfterRestart 留痕）；否则保持「进程重启中断」原语义。
  * @returns {Promise<OperationRecord[]>} 改标后的记录列表（不落库；由调用方 replaceAll）
  */
-export async function restoreRecords(records, stillApplies) {
+export async function restoreRecords(records, stillApplies, installedVersionOf) {
   const list = Array.isArray(records) ? records : []
   const out = []
   for (const rec of list) {
@@ -271,6 +275,31 @@ export async function restoreRecords(records, stillApplies) {
     } else if (rec.status === 'input') {
       out.push({ ...rec, status: 'failed', error: '待决确认不可恢复，请重新发起', updatedAt: Date.now() })
     } else if (rec.status === 'running') {
+      // 0.10.3（挂账 1，0.10.2 真机事件）：升级/自升级中断 ≠ 一定失败——installBundle 可能已写穿
+      // 账面（post-write 伪失败）而面板随宿主换装重载打断了泵落账。实读账面：已到 meta.toVersion
+      // = 升级事实成立，改判 done（reconciledAfterRestart 留痕）；否则保持中断原语义。
+      if (
+        rec.kind === 'upgrade' &&
+        rec.meta && typeof rec.meta.toVersion === 'string' && rec.meta.toVersion !== '' &&
+        typeof installedVersionOf === 'function'
+      ) {
+        let installed
+        try {
+          installed = await installedVersionOf(rec)
+        } catch {
+          installed = undefined
+        }
+        if (installed === rec.meta.toVersion) {
+          out.push({
+            ...rec,
+            status: 'done',
+            error: undefined,
+            meta: { ...rec.meta, reconciledAfterRestart: true },
+            updatedAt: Date.now(),
+          })
+          continue
+        }
+      }
       out.push({ ...rec, status: 'failed', error: '进程重启中断', updatedAt: Date.now() })
     } else {
       out.push({ ...rec })

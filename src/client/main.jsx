@@ -2037,11 +2037,12 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
   const doUpgrade = async (it) => {
     try {
       // 0.9.75：升级结果版本变迁（from/to，github 源回退 sha 前 7 位）经 opMeta 落账进操作记录
+      // 0.10.3（挂账 1 数据面）：toVersion 随 enqueue 落 meta（中断恢复对账的比对依据）
       const res = await ops.runOp("upgrade", it.installedPkg, async () => {
         const r = await api("upgrade", { pkg: it.installedPkg });
         const m = opUpgradeMeta(r);
         return m ? { ...r, opMeta: m } : r;
-      });
+      }, { toVersion: it.latest });
       // 0.10.0 R4：降级恢复结局（升级失败但已自动回装旧版）→ warn 投影，绝不进成功臂（「升级成功 vX→vY」与回滚事实相反）
       const degraded = oc.degradedOutcome(res);
       if (degraded) {
@@ -2549,11 +2550,12 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
   const doUpgrade = async (it) => {
     try {
       // 0.9.75：升级结果版本变迁（from/to，github 源回退 sha 前 7 位）经 opMeta 落账进操作记录
+      // 0.10.3（挂账 1 数据面）：toVersion 随 enqueue 落 meta（中断恢复对账的比对依据）
       const res = await ops.runOp("upgrade", it.pkg, async () => {
         const r = await api("upgrade", { pkg: it.pkg });
         const m = opUpgradeMeta(r);
         return m ? { ...r, opMeta: m } : r;
-      });
+      }, { toVersion: it.latestVersion });
       // 0.10.0 R4：降级恢复结局（升级失败但已自动回装旧版）→ warn 投影，绝不进成功臂（与回滚事实相反）
       const degraded = oc.degradedOutcome(res);
       if (degraded) {
@@ -3348,11 +3350,12 @@ function DshmVersionChip({ version, notify, initialCheck, ops }) {
       // 0.10.0 历史注记：自升级 tarball 直覆盖通道（D3）已恢复——desktop 上「升级 dsh-m 自身」
       // 的全部入口（头部角标 + 已装/市场卡片通用升级按钮 + Agent 工具）经服务端 core 缝改道
       // （SELF_PKG 单点，SELF_PKG='dsh-m'），0.9.6-0.9.94 间「desktop 自升级不可用」状态自此终结。
+      // 0.10.3（挂账 1 数据面）：toVersion 随 enqueue 落 meta——中断恢复对账的比对依据。
       const res = await (ops
         ? ops.runOp("upgrade", "dsh-m", async () => {
             const r = await api("self-upgrade");
             return { ...r, opMeta: { from: version, to: r.version || "latest" } };
-          }, { npm: "dsh-m" })
+          }, { npm: "dsh-m", toVersion: state.latest })
         : api("self-upgrade"));
       clearSelfCheckCache(typeof window !== "undefined" && window.localStorage ? window.localStorage : null);
       // 升级成功：缓存已清、本地判回最新态；重启横幅由 notify 的 needsRestart 通道给出（builds 段 0.9.94 换 op-outcome）
@@ -3947,20 +3950,31 @@ function MarketPanel({ onClose }) {
       if (opsPumpCtx && opsPumpCtx.syncOps === syncOps) opsPumpCtx = null;
     };
   }, [stillApplies, dispatchRestored, syncOps, refreshViews]);
+  // 0.10.3（挂账 1）：中断升级的账实复读缝——返回 target 的实装版本（恢复对账用；读法与 stillApplies 同款实读）
+  const installedVersionOf = useCallback(async (r) => {
+    try {
+      const fresh = await api("installed", { probe: false });
+      const items = fresh && Array.isArray(fresh.items) ? fresh.items : [];
+      const row = items.find((it) => it && it.pkg === r.target);
+      return row && typeof row.version === "string" ? row.version : undefined;
+    } catch {
+      return undefined;
+    }
+  }, []);
   // 恢复时序（0.7.0 Task 13）：installed resolve → restoreRecords（校验改标）→ 启动**同一个**前台泵
   const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current || !installed.data) return;
     restoredRef.current = true;
     void (async () => {
-      const restored = await restoreRecords(opsStore.list(), stillApplies);
+      const restored = await restoreRecords(opsStore.list(), stillApplies, installedVersionOf);
       opsStore.replaceAll(restored);
       syncOps();
       if (restored.some((r) => r.status === "queued")) {
         void opsPump.kick(); // 洞3：恢复并入前台泵（单一执行路径；drainRestored 循环退役）
       }
     })();
-  }, [installed.data, stillApplies, syncOps]);
+  }, [installed.data, stillApplies, installedVersionOf, syncOps]);
   const counts = {
     market: marketCommunity.data ? marketCommunity.data.total : null,
     installed: installed.data ? installed.data.items.length : null,

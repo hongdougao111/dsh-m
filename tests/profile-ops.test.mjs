@@ -727,6 +727,20 @@ describe('enable 竞速重试普适化 + 回装失败账实复读（0.10.1，真
     assert.equal((await readUpgradeIntent())?.status, 'resolved')
   })
 
+  it('T-D3：applied → needsRestart=false（0.10.2 挂账 3：core 层直接钉，替代 client 层间接覆盖）', async () => {
+    process.env.DSHM_UPGRADE_INTENT_FILE = join(mkdtempSync(join(tmpdir(), 'dshm-profileops-intent-')), 'self-upgrade-intent.json')
+    const { service, calls } = managerStub({
+      bundles: [{ name: 'dsh-m', installed: true, enabled: true }],
+      installBundle: async (spec, options) => {
+        calls.installBundle.push({ spec, options })
+        return { changed: true, application: 'applied', stage: 'install', bundle: 'dsh-m', packageResult: { exitCode: 0 } }
+      },
+    })
+    const res = await desktopSelfUpgradeViaTarball('dsh-m', '0.9.94', {}, d3Deps(service))
+    assert.equal(res.needsRestart, false, 'R10：applied → 无需重启横幅（core 直钉）')
+    assert.equal((await readUpgradeIntent())?.outcome, 'ok')
+  })
+
   // ---------- 0.10.1（E2E 实证 ③）：install 路径守卫命中一律两步化（去掉 previousVersion 前置门） ----------
   // 真机事件：卸载 → 同会话重装，宿主活跃态仍视其在装（守卫命中），而 previousVersion 探测口径为「未安装」
   // → 0.10.0 原样透传 already-installed。修法：守卫命中即 remove+add（官方语义），无旧版时失败走账实复读。

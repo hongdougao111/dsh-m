@@ -436,6 +436,36 @@ describe('createOpsPump（0.7.0 评审 P4：生产泵的直接测试）', () => 
   })
 })
 
+// ---------- 0.10.3（挂账 1，0.10.2 真机事件）：恢复记账对账——中断升级若账面已到目标版则改判完成 ----------
+
+describe('restoreRecords 恢复记账对账（0.10.3 挂账 1）', () => {
+  const running = (over = {}) => rec({ id: 'r1', kind: 'upgrade', target: 'pkg-a', status: 'running', meta: { toVersion: '2.0.0', session: undefined }, ...over })
+  const ivo = (v) => async () => v
+
+  it('① running 升级中断 + 账面已到目标版 → 改判 done（reconciledAfterRestart 留痕、error 清零）', async () => {
+    const out = await restoreRecords([running()], ivo('2.0.0'), ivo('2.0.0'))
+    assert.equal(out[0].status, 'done')
+    assert.equal(out[0].error, undefined, '中断文案清零（不残留假失败）')
+    assert.equal(out[0].meta.reconciledAfterRestart, true, '改判留痕')
+    assert.equal(out[0].meta.toVersion, '2.0.0')
+  })
+
+  it('② 账面未到目标版 → 保持「进程重启中断」失败标注（真中断不洗白）', async () => {
+    const out = await restoreRecords([running()], ivo('2.0.0'), ivo('1.0.0'))
+    assert.equal(out[0].status, 'failed')
+    assert.equal(out[0].error, '进程重启中断')
+  })
+
+  it('③ 无 meta.toVersion / 非 upgrade kind / 未传 installedVersionOf → 原语义（向后兼容）', async () => {
+    const noMeta = await restoreRecords([running({ meta: {} })], ivo('2.0.0'), ivo('2.0.0'))
+    assert.equal(noMeta[0].status, 'failed')
+    const nonUpgrade = await restoreRecords([running({ kind: 'install' })], ivo('2.0.0'), ivo('2.0.0'))
+    assert.equal(nonUpgrade[0].status, 'failed')
+    const legacy = await restoreRecords([running()], ivo('2.0.0'))
+    assert.equal(legacy[0].status, 'failed', '不传第三参 = 原行为（既有调用方零迁移）')
+  })
+})
+
 describe('恢复所有权语义（R3·N1 修正：session 标记区分泵拥有 vs 崩溃残留）', () => {
   it('端到端：crashed running（无标记）经 restoreRecords→replaceAll 落库为 failed「进程重启中断」', async () => {
     const storage = memStorage()

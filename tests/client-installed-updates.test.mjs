@@ -87,3 +87,21 @@ describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表�
     assert.equal(count('"op.degraded":'), 2, 'zh/en 各一枚')
   })
 })
+
+// ---------- 0.10.3（挂账 1 数据面）：升级目标版随 enqueue 落 meta（中断恢复对账的比对依据） ----------
+describe('升级 enqueue meta 携带 toVersion（0.10.3：三站点单行锚）', () => {
+  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+  const count = (needle) => src.split(needle).length - 1
+
+  it('① chip 静默升级以运行时探测的 latest 为目标版', () => {
+    assert.equal(count('{ npm: "dsh-m", toVersion: state.latest }'), 1)
+  })
+
+  it('② 已装列表以 updates 合并的 latestVersion 为目标版', () => {
+    assert.equal(count('{ toVersion: it.latestVersion }'), 1)
+  })
+
+  it('③ 市场卡以卡片 latest 为目标版（升级站点 meta 原为空对象，第 4 参落 meta）', () => {
+    assert.equal(count('{ toVersion: it.latest }'), 1, '市场卡 doUpgrade meta 锚')
+  })
+})
