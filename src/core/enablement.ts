@@ -5,10 +5,11 @@
  * ⋈ 已装清单（installed.ts，含包内补丁层行枚举）⋈ profile bundles 数组 ⋈ profile
  * 覆盖行。委派/降级两模式共用同一读法，读路径零服务依赖。
  *
- * 观察量口径（官方 readPluginInventory 同款）：
- * - enabled = !entry.disabled（entry 顶层有效停用态，含被禁用的祖先组）；
- * - phase = fiber.state 数字枚举投影（0 pending / 1 loading / 2 active / 3 failed /
- *   4 disposed→null / 5 unloading；fiber 不存在即 null）；
+ * 观察量口径（官方 readPluginInventory 同款，多行聚合）：
+ * - enabled = 同包全部 loader entry 中任一行 !entry.disabled（skip-browser-auth 0.4.x
+ *   起同包双代门控行：休眠行 disabled:true + 活性行并存，任一启用即整包启用）；
+ * - phase = 首个启用行的 fiber.state 数字枚举投影（0 pending / 1 loading / 2 active /
+ *   3 failed / 4 disposed→null / 5 unloading；fiber 不存在即 null）；
  * - CLI 无 loader 形态：enabled 从「在 bundles 且其补丁行无 disabled 覆盖」推断，
  *   phase 恒 null。
  *
@@ -80,12 +81,13 @@ function mapPhase(fiber: LoaderEntry['fiber']): LivePhase {
   return FIBER_PHASE[state] ?? null
 }
 
-/** 按模块名在 loader 条目中找插件的第一条非 group 条目（官方 moduleName 匹配同款）。 */
-function findLoaderEntry(entries: Iterable<LoaderEntry>, pkg: string): LoaderEntry | null {
+/** 按模块名收集插件的全部非 group 条目（同包可有多行：skip-browser-auth 0.4.x 双代门控行）。 */
+function findLoaderEntries(entries: Iterable<LoaderEntry>, pkg: string): LoaderEntry[] {
+  const found: LoaderEntry[] = []
   for (const entry of entries) {
-    if (entry && entry.options?.name === pkg) return entry
+    if (entry && entry.options?.name === pkg) found.push(entry)
   }
-  return null
+  return found
 }
 
 /**
@@ -99,16 +101,21 @@ export function composeEnablement(input: ComposeEnablementInput): Map<string, Pl
   const overrideIndex = new Map(profileOverrides.map((row) => [row.id, row.disabled]))
   for (const item of items) {
     const pkg = item.pkg
-    const entry = loaderEntries !== null ? findLoaderEntry(loaderEntries, pkg) : null
+    const matches = loaderEntries !== null ? findLoaderEntries(loaderEntries, pkg) : []
+    const entry = matches[0] ?? null
     const inBundles = bundles.includes(pkg)
     const rowIds = item.patchRows?.inserts.map((row) => row.id) ?? []
 
     let enabled: boolean
     let phase: LivePhase = null
     if (loaderEntries !== null) {
-      // loader 是活体权威：无 entry = 未运行（bundle 未选 / 树缺条目），enabled:false
-      enabled = entry !== null && !entry.disabled
-      if (entry !== null) phase = mapPhase(entry.fiber)
+      // loader 是活体权威：无 entry = 未运行（bundle 未选 / 树缺条目），enabled:false。
+      // 同包多行（双代门控，如 skip-browser-auth 的 webRuntime 行 + webStartup 行）
+      // 「任一行启用」即整包启用——单取首行会把首行恰为自门控休眠行（disabled:true）
+      // 的整包误报成停用（2026-10-19 实测，官方页口径一致）。
+      enabled = matches.some((row) => !row.disabled)
+      const liveRow = matches.find((row) => !row.disabled)
+      if (liveRow !== undefined) phase = mapPhase(liveRow.fiber)
     } else {
       // CLI 无 loader 形态：在 bundles 且其补丁行无 disabled 覆盖 → 视为启用
       const disabledByOverride = rowIds.some((id) => overrideIndex.get(id) === true)

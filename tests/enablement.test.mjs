@@ -88,6 +88,42 @@ describe('composeEnablement：有 loader 形态', () => {
     assert.equal(rows.get('demo-pkg').toggleable, true)
   })
 
+  it('同包多行（双代门控）：首行休眠 disabled:true + 次行启用 → 整包 enabled、phase 取活性行（2026-10-19 skip-browser-auth 实测回归）', () => {
+    const rows = composeEnablement({
+      items: [item('@iasiv5/dsh-skip-browser-auth', {
+        inserts: [
+          { id: 'trusted-connection', name: '@iasiv5/dsh-skip-browser-auth' },
+          { id: 'trusted-connection-021', name: '@iasiv5/dsh-skip-browser-auth' },
+        ],
+        configRows: 0,
+        readable: true,
+      })],
+      loaderEntries: [
+        entry('@iasiv5/dsh-skip-browser-auth', { disabled: true }),
+        { ...entry('@iasiv5/dsh-skip-browser-auth', { state: 2 }), id: 'trusted-connection-021' },
+      ],
+      bundles: ['@iasiv5/dsh-skip-browser-auth'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('@iasiv5/dsh-skip-browser-auth').enabled, true)
+    assert.equal(rows.get('@iasiv5/dsh-skip-browser-auth').phase, 'active')
+    assert.equal(rows.get('@iasiv5/dsh-skip-browser-auth').toggleable, true)
+  })
+
+  it('同包多行全休眠 → enabled:false、phase:null', () => {
+    const rows = composeEnablement({
+      items: [item('demo-pkg', SINGLE)],
+      loaderEntries: [
+        entry('demo-pkg', { disabled: true }),
+        entry('demo-pkg', { disabled: true }),
+      ],
+      bundles: ['demo-pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('demo-pkg').enabled, false)
+    assert.equal(rows.get('demo-pkg').phase, null)
+  })
+
   it('全部相位枚举值映射（0-5 + 未知）', () => {
     const cases = [
       [0, 'pending'],
@@ -143,8 +179,8 @@ describe('composeEnablement：保护与 no-entry', () => {
     assert.equal(rows.get('@deepseek-ai/dsh-hmr').lockReason, 'protected')
   })
 
-  it('PROTECTED_MODULES 覆盖官方 16 项全集 + dsh-m', () => {
-    assert.equal(PROTECTED_MODULES.length, 17)
+  it('PROTECTED_MODULES 覆盖官方 17 项全集 + dsh-m（0.2.1 新增 dsh-api-remote-access，008 镜像口径）', () => {
+    assert.equal(PROTECTED_MODULES.length, 18)
     assert.equal(PROTECTED_MODULES.includes('dsh-m'), true)
     const official = [
       '@deepseek-ai/dsh-plugin-manager',
@@ -158,6 +194,7 @@ describe('composeEnablement：保护与 no-entry', () => {
       '@deepseek-ai/dsh-host-plugin-inventory',
       '@deepseek-ai/dsh-typert-registry',
       '@deepseek-ai/dsh-api-remotes',
+      '@deepseek-ai/dsh-api-remote-access',
       '@deepseek-ai/cordis-plugin-timer',
       '@deepseek-ai/dsh-client-connection',
       '@deepseek-ai/dsh-host-frontend-static',
