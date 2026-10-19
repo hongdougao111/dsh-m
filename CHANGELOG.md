@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.8 修复：开关读路径同包多行误报「已停用」（skip-browser-auth 双代门控撞首行匹配）
+
+- **需求（2026-10-19，主人）**：官方插件页 `@iasiv5/dsh-skip-browser-auth` 开关 ON，dsh-m 已装面板却显示「已停用」——账实分离（无 token `GET /` 200 + journal `BrowserAuth has been skipped` 横幅证明插件真在跑，dsh-m 读数是错的）。
+- **根因**：skip-auth 0.4.x 双代门控设计在宿主 loader 注册两行同名 entry（`trusted-connection` webRuntime 行 + `trusted-connection-021` webStartup 行），每行 `!!js` 自门控恰好一活一睡；dsh-m 读路径 `findLoaderEntry` 按包名匹配取**首行**，0.2.1-rc.x 上首行恰为休眠行（disabled:true）→ 整包误判停用（官方 readPluginInventory 聚合口径不同故显示正确）。
+- **方案**：`composeEnablement` 改 `findLoaderEntries` 全量聚合——`enabled = 任一行 !disabled`，phase 取首个启用行的 fiber 投影；单行插件语义不变（回归测试锁死）。写路径本就多行安全（宿主形态委派官方 `setBundleEnabled` + 复读 `.some()`），不动。顺手修正陈旧断言：PROTECTED_MODULES 官方 17 项 + dsh-m = 18（`3239460` 补 `dsh-api-remote-access` 时期望值漏更，stash 对照证实非本轮回归）。
+- **验证**：新增双行回归测试（一睡一活 → enabled+active；全睡 → false+null）；enablement+installed 55/55 绿、全量 0 fail；真机热部署验证 `/dshm installed` 返回 `enabled:true, phase:"active"`，重启后与官方页一致。运维留痕见 dsh-workspace know-how 038（热部署备份与升级后必查；本版发布后该热修按退役规则收编）。
+
 ### 0.10.7 修复：对账补横幅一次性化（独立已读集合 + 先落账后补报）+ 0.10.6 retro 工程基建
 
 - **需求（2026-10-18，主人）**：0.10.5→0.10.6 升级后，恢复对账完成横幅**每次开面板都弹**（「已到 v0.10.6」）——按 0.10.4 引入时「成功结局不该静默」的本意它应只提醒一次；每开必弹的根因（done 落账被真机复活路径打回 running）未定谳（本地测试不可复现）。
@@ -710,6 +717,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fix in 0.10.8 — enablement read path misreports multi-entry packages as disabled (skip-browser-auth dual-generation gating hits first-match)
+
+- **Need (2026-10-19, owner)**: the official plugin page showed `@iasiv5/dsh-skip-browser-auth` ON while the dsh-m installed panel showed it as disabled — books vs. reality split (token-less `GET /` returned 200 and the journal carried the `BrowserAuth has been skipped` banner, proving the plugin was actually running; the dsh-m reading was the wrong one).
+- **Root cause**: skip-auth 0.4.x ships a dual-generation self-gating design that registers two same-named loader entries (`trusted-connection` webRuntime row + `trusted-connection-021` webStartup row), each with a `!!js` gate so exactly one row is alive per host; the dsh-m read path (`findLoaderEntry`) matched by package name and took the **first** row — on 0.2.1-rc.x that is the dormant row (disabled:true), so the whole package was misread as disabled (the official readPluginInventory aggregates differently and showed the truth).
+- **Approach**: `composeEnablement` now collects all matching entries (`findLoaderEntries`) — `enabled = any row !disabled`, with phase projected from the first enabled row's fiber; single-entry semantics unchanged (locked by regression tests). The write path was already multi-entry safe (host mode delegates to the official `setBundleEnabled` and re-reads with `.some()`) and is untouched. Also fixed a stale assertion: PROTECTED_MODULES official 17 items + dsh-m = 18 (the expectation was missed when `3239460` added `dsh-api-remote-access`; a stash comparison proved it was not a regression from this change).
+- **Verification**: new dual-entry regression tests (one dormant one live → enabled+active; all dormant → false+null); enablement+installed 55/55 green, full suite 0 failures; on-machine hot-deploy verification returned `enabled:true, phase:"active"` from `/dshm installed`, consistent with the official page after restart.
 
 ### Fixes in 0.10.7 — reconciliation completion banner deduplicated once (independent seen-set + persist-before-notify) + 0.10.6 retro engineering groundwork
 
