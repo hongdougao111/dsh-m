@@ -25,6 +25,8 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+// ADR-0023 第一刀：CSS 锚改读 styles.js（JSX 锚仍读 main.jsx）
+const stylesSrc = readFileSync(join(root, 'src/client/styles.js'), 'utf8')
 const { lbStep, lbNeighbors, swipeDir } = await import(join(root, 'src/client/lightbox.js'))
 
 describe('lbStep 环形步进（灯箱 ‹›/键盘 ←→ 共用）', () => {
@@ -53,15 +55,15 @@ describe('灯箱 v2 结构锚（0.9.60 根因修复 + 评审吸收守卫）', ()
     assert.ok(src.includes('typeof document !== "undefined" && document.body'), '无 document（SSR）回退非 portal 树')
   })
   it('R1：✕/‹› 用复合选择器，防基础 .dsvm-btn 规则（源顺序靠后）级联反杀', () => {
-    assert.ok(src.includes('.dsvm-btn.dsvm-lbclose{position:absolute;top:12px;right:12px'), '✕ 复合选择器在')
-    assert.ok(src.includes('.dsvm-btn.dsvm-lbarrow{position:absolute;top:50%'), '‹› 复合选择器在')
-    assert.ok(src.includes('.dsvm-btn.dsvm-lbarrow{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:60px;padding:0;font-size:26px'), '设计值 padding:0/font-size:26px 随复合选择器生效')
-    assert.ok(!/(?<!\.dsvm-btn)\.dsvm-lbarrow\{position:absolute/.test(src), '单类 .dsvm-lbarrow 规则不得存在（会被反杀成摆设）')
-    assert.ok(!/(?<!\.dsvm-btn)\.dsvm-lbclose\{position:absolute/.test(src), '单类 .dsvm-lbclose 规则不得存在')
+    assert.ok(stylesSrc.includes('.dsvm-btn.dsvm-lbclose{position:absolute;top:12px;right:12px'), '✕ 复合选择器在')
+    assert.ok(stylesSrc.includes('.dsvm-btn.dsvm-lbarrow{position:absolute;top:50%'), '‹› 复合选择器在')
+    assert.ok(stylesSrc.includes('.dsvm-btn.dsvm-lbarrow{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:60px;padding:0;font-size:26px'), '设计值 padding:0/font-size:26px 随复合选择器生效')
+    assert.ok(!/(?<!\.dsvm-btn)\.dsvm-lbarrow\{position:absolute/.test(stylesSrc), '单类 .dsvm-lbarrow 规则不得存在（会被反杀成摆设）')
+    assert.ok(!/(?<!\.dsvm-btn)\.dsvm-lbclose\{position:absolute/.test(stylesSrc), '单类 .dsvm-lbclose 规则不得存在')
   })
   it('R2：top 让出 Windows 拖拽带（0.9.4 先例），Web 回落 0px 行为不变', () => {
-    assert.ok(src.includes('.dsvm-lightbox{position:fixed;top:var(--dsh-windows-titlebar-height,0px)'), '拖拽带避让在')
-    assert.ok(!src.includes('.dsvm-lightbox{position:fixed;inset:0'), 'inset:0 形态退役（会把 ✕ 顶进拖拽带）')
+    assert.ok(stylesSrc.includes('.dsvm-lightbox{position:fixed;top:var(--dsh-windows-titlebar-height,0px)'), '拖拽带避让在')
+    assert.ok(!stylesSrc.includes('.dsvm-lightbox{position:fixed;inset:0'), 'inset:0 形态退役（会把 ✕ 顶进拖拽带）')
   })
   it('R3：焦点还原——捕获声明在聚焦 ✕ 之前，卸载归还触发元素', () => {
     assert.ok(src.includes('prevFocusRef.current = document.activeElement;'), '捕获 activeElement 在')
@@ -79,9 +81,9 @@ describe('灯箱 v2 结构锚（0.9.60 根因修复 + 评审吸收守卫）', ()
     assert.ok(src.includes('className: "dsvm-btn dsvm-lbclose"'), '✕ 走 dsvm-btn 视觉 + dsvm-lbclose 定位')
   })
   it('底部 pill 绝对定位 + 图片 74vh 留位（构造上不可能被挤出屏）', () => {
-    assert.ok(src.includes('.dsvm-lbbar{position:absolute;left:50%;bottom:14px'), 'pill 绝对定位')
-    assert.ok(src.includes('.dsvm-lightbox img{max-width:min(92vw,1500px);max-height:74vh'), '图片降位（旧 80vh 在窗口态必然溢出面板盒）')
-    assert.ok(!src.includes('.dsvm-lbnav{'), '旧 in-flow 导航行退役')
+    assert.ok(stylesSrc.includes('.dsvm-lbbar{position:absolute;left:50%;bottom:14px'), 'pill 绝对定位')
+    assert.ok(stylesSrc.includes('.dsvm-lightbox img{max-width:min(92vw,1500px);max-height:74vh'), '图片降位（旧 80vh 在窗口态必然溢出面板盒）')
+    assert.ok(!stylesSrc.includes('.dsvm-lbnav{'), '旧 in-flow 导航行退役')
   })
   it('键盘 ‹› 与组件统一走 lbStep（内联取模退役；0.9.61 键盘基准随 visible）', () => {
     assert.ok(src.includes('lbStep(index, -1, shots.length)') && src.includes('lbStep(index, 1, shots.length)'), '组件 ‹› 走 lbStep')
@@ -91,29 +93,30 @@ describe('灯箱 v2 结构锚（0.9.60 根因修复 + 评审吸收守卫）', ()
 })
 
 describe('灯箱 0.9.62 影院自持（皮肤碰撞修复）+ 加载指示', () => {
-  it('影院遮罩自持：background !important（清单定长，新增须显式登记）', () => {
-    assert.ok(src.includes('.dsvm-lightbox{position:fixed;top:var(--dsh-windows-titlebar-height,0px);left:0;right:0;bottom:0;z-index:2147483200;background:rgba(0,0,0,.88)!important'), '影院深色遮罩 !important 自持（dsh-skins ADR-0007 浅色 tint 碰撞实拍）')
-    assert.equal((src.match(/!important/g) || []).length, 4, '!important 定长：注释提及×2 + 影院自持×1 + sidebar footer 兼容×1（0.9.70 拖拽自持退役清单回归）——新增须改本断言登记')
+  it('影院遮罩自持：background !important（清单定长，新增须显式登记；ADR-0023 第一刀：计数随 CSS 迁 styles.js，实测四处全在 styles.js）', () => {
+    assert.ok(stylesSrc.includes('.dsvm-lightbox{position:fixed;top:var(--dsh-windows-titlebar-height,0px);left:0;right:0;bottom:0;z-index:2147483200;background:rgba(0,0,0,.88)!important'), '影院深色遮罩 !important 自持（dsh-skins ADR-0007 浅色 tint 碰撞实拍）')
+    assert.equal((stylesSrc.match(/!important/g) || []).length, 4, '!important 定长：注释提及×2 + 影院自持×1 + sidebar footer 兼容×1（0.9.70 拖拽自持退役清单回归）——新增须改本断言登记')
+    assert.equal((src.match(/!important/g) || []).length, 0, 'main.jsx 侧零残留（CSS 出仓后 JS 面不得新增）')
   })
   it('拖拽态观感与静止态一致（0.9.70 修订）：仅光标/阴影变化，玻璃与 blur 不动', () => {
-    assert.ok(src.includes('.dshm-panel--dragging{cursor:grabbing;box-shadow:0 24px 64px rgba(2,6,23,.38)}'), '拖拽态只动光标与投影加深（0.9.69 实心固化浅色模式跳变实拍，退役）')
-    assert.equal(src.includes('--dshm-drag-bg'), false, '计算值固化退役无残留（CSS 变量/JS 接线/注释全部清空）')
-    assert.ok(src.includes('.dshm-panel.abs{position:absolute;margin:0}'), '还原态绝对定位形态在（无记忆时 flex 居中不变）')
-    assert.ok(src.includes('.dshm-panel:not(.full):not(.dshm-panel--dragging) .dshm-head{cursor:grab}'), 'grab 仅还原态非拖拽中直接命中 head（拖拽中继承 grabbing；全屏不误导）')
+    assert.ok(stylesSrc.includes('.dshm-panel--dragging{cursor:grabbing;box-shadow:0 24px 64px rgba(2,6,23,.38)}'), '拖拽态只动光标与投影加深（0.9.69 实心固化浅色模式跳变实拍，退役）')
+    assert.equal(stylesSrc.includes('--dshm-drag-bg') || src.includes('--dshm-drag-bg'), false, '计算值固化退役无残留（styles.js CSS/变量面 + main.jsx JS/注释面双扫）')
+    assert.ok(stylesSrc.includes('.dshm-panel.abs{position:absolute;margin:0}'), '还原态绝对定位形态在（无记忆时 flex 居中不变）')
+    assert.ok(stylesSrc.includes('.dshm-panel:not(.full):not(.dshm-panel--dragging) .dshm-head{cursor:grab}'), 'grab 仅还原态非拖拽中直接命中 head（拖拽中继承 grabbing；全屏不误导）')
   })
   it('‹›/✕ 深色玻璃芯片：任何遮罩上可读，显式 :hover 压基础规则源顺序', () => {
-    assert.ok(src.includes('.dsvm-btn.dsvm-lbclose,.dsvm-btn.dsvm-lbarrow{background:rgba(15,23,42,.55)'), '芯片深底在（与底部 pill 同族 slate-900）')
-    assert.ok(src.includes('border-color:rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.35);backdrop-filter:blur(8px)'), '描边+投影+blur 在')
-    assert.ok(src.includes('.dsvm-btn.dsvm-lbclose:hover,.dsvm-btn.dsvm-lbarrow:hover{background:rgba(15,23,42,.8)'), '显式 :hover 提亮（特异性 0,3,0 压 .dsvm-btn:hover 0,2,0）')
+    assert.ok(stylesSrc.includes('.dsvm-btn.dsvm-lbclose,.dsvm-btn.dsvm-lbarrow{background:rgba(15,23,42,.55)'), '芯片深底在（与底部 pill 同族 slate-900）')
+    assert.ok(stylesSrc.includes('border-color:rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.35);backdrop-filter:blur(8px)'), '描边+投影+blur 在')
+    assert.ok(stylesSrc.includes('.dsvm-btn.dsvm-lbclose:hover,.dsvm-btn.dsvm-lbarrow:hover{background:rgba(15,23,42,.8)'), '显式 :hover 提亮（特异性 0,3,0 压 .dsvm-btn:hover 0,2,0）')
   })
   it('加载转圈：走链期间占位，settled 即卸载', () => {
-    assert.ok(src.includes('@keyframes dsvm-lbspin{to{transform:rotate(360deg)}}'), 'keyframes 在')
-    assert.ok(src.includes('.dsvm-lbspin{position:absolute;left:50%;top:50%'), '转圈居中定位在')
+    assert.ok(stylesSrc.includes('@keyframes dsvm-lbspin{to{transform:rotate(360deg)}}'), 'keyframes 在')
+    assert.ok(stylesSrc.includes('.dsvm-lbspin{position:absolute;left:50%;top:50%'), '转圈居中定位在')
     assert.ok(src.includes('!chain.settled && chain.src ? h("div", { className: "dsvm-lbspin", "aria-hidden": "true", onClick: onClose }) : null'), 'JSX 门控：未 settled 且有 src 才渲染；onClick=onClose（backdrop 守卫只认根元素，转圈子元素须显式接关）')
   })
   it('图片淡入：onLoad（settled）后 160ms 淡入，img 类名随 chain.settled', () => {
-    assert.ok(src.includes('.dsvm-lightbox .dsvm-lbimg{opacity:0;transition:opacity .16s ease-out}'), '淡入规则在')
-    assert.ok(src.includes('.dsvm-lightbox .dsvm-lbimg.dsvm-lbimg-on{opacity:1}'), 'settled 显影类在')
+    assert.ok(stylesSrc.includes('.dsvm-lightbox .dsvm-lbimg{opacity:0;transition:opacity .16s ease-out}'), '淡入规则在')
+    assert.ok(stylesSrc.includes('.dsvm-lightbox .dsvm-lbimg.dsvm-lbimg-on{opacity:1}'), 'settled 显影类在')
     assert.ok(src.includes('className: `dsvm-lbimg${chain.settled ? " dsvm-lbimg-on" : ""}`'), 'img 类名接 settled')
     assert.ok(src.includes('src: chain.src, alt: "", onClick: onClose, referrerPolicy: "no-referrer", decoding: "async", onError: chain.onError, onLoad: chain.onLoad'), 'img 既有属性锚保持（点图即关/走链）')
   })
@@ -121,7 +124,7 @@ describe('灯箱 0.9.62 影院自持（皮肤碰撞修复）+ 加载指示', () 
     assert.ok(src.includes('return { src, failed, retry, onError, onLoad, settled };'), 'hook 返回 settled')
   })
   it('prefers-reduced-motion：淡入停用、转圈降速', () => {
-    assert.ok(src.includes('@media (prefers-reduced-motion:reduce){.dsvm-lbspin{animation-duration:1.6s}.dsvm-lightbox .dsvm-lbimg{transition:none}}'), 'reduced-motion 块在')
+    assert.ok(stylesSrc.includes('@media (prefers-reduced-motion:reduce){.dsvm-lbspin{animation-duration:1.6s}.dsvm-lightbox .dsvm-lbimg{transition:none}}'), 'reduced-motion 块在')
   })
 })
 
@@ -168,6 +171,6 @@ describe('灯箱 0.9.65 邻图预取 + 触屏滑动 + 焦点圈闭', () => {
     assert.ok(src.includes('(e.shiftKey ? last : first).focus();'), 'Shift+Tab 反向回绕')
   })
   it('touch-action：横滑交给灯箱，纵向原生与 pinch 缩放可达性保留', () => {
-    assert.ok(src.includes('justify-content:center;touch-action:pan-y pinch-zoom}'), 'touch-action 在遮罩规则上')
+    assert.ok(stylesSrc.includes('justify-content:center;touch-action:pan-y pinch-zoom}'), 'touch-action 在遮罩规则上（styles.js）')
   })
 })

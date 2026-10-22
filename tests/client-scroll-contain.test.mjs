@@ -22,27 +22,29 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+// ADR-0023 第一刀：CSS 锚改读 styles.js（hook/接线锚仍读 main.jsx）
+const stylesSrc = readFileSync(join(root, 'src/client/styles.js'), 'utf8')
 
 describe('0.9.72 滚轮治理：contain 条件挂载（滚轮黑洞修复）', () => {
   it('恒挂形态退役：基规则不再带 overscroll-behavior', () => {
     assert.ok(
-      !src.includes('.dshm-ops-scroll{max-height:220px;overflow-y:auto;overscroll-behavior:contain}'),
+      !stylesSrc.includes('.dshm-ops-scroll{max-height:220px;overflow-y:auto;overscroll-behavior:contain}'),
       'dshm-ops-scroll 恒挂 contain 已退役',
     )
     assert.ok(
-      !src.includes('.dshm-banner-text{flex:1;max-height:140px;overflow:auto;overscroll-behavior:contain'),
+      !stylesSrc.includes('.dshm-banner-text{flex:1;max-height:140px;overflow:auto;overscroll-behavior:contain'),
       'dshm-banner-text 恒挂 contain 已退役',
     )
   })
 
   it('条件挂载形态在：.is-scrollable 才带 contain，基规则保持可链滚', () => {
     assert.ok(
-      src.includes('.dshm-ops-scroll{max-height:220px;overflow-y:auto}') &&
-        src.includes('.dshm-ops-scroll.is-scrollable{overscroll-behavior:contain}'),
+      stylesSrc.includes('.dshm-ops-scroll{max-height:220px;overflow-y:auto}') &&
+        stylesSrc.includes('.dshm-ops-scroll.is-scrollable{overscroll-behavior:contain}'),
       'dshm-ops-scroll 双规则对（基规则可链滚 + is-scrollable 才断链）',
     )
     assert.ok(
-      src.includes('.dshm-banner .dshm-banner-text.is-scrollable{overscroll-behavior:contain}'),
+      stylesSrc.includes('.dshm-banner .dshm-banner-text.is-scrollable{overscroll-behavior:contain}'),
       'dshm-banner-text 条件规则在',
     )
   })

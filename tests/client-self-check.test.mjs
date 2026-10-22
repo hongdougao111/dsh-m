@@ -138,6 +138,8 @@ describe('deriveChipState 三态', () => {
 })
 
 // ---------- 0.10.2（主人 2026-10-17 裁决）：静默自升级——撤确认框，角标点击直接升级（结构钉） ----------
+// ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）
+const i18nSrc = readFileSync(new URL('../src/client/i18n.js', import.meta.url), 'utf8')
 describe('0.10.2 静默自升级（结构序钉；0.10.1 确认框按主人体验裁决撤除）', () => {
   const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
 
@@ -157,9 +159,9 @@ describe('0.10.2 静默自升级（结构序钉；0.10.1 确认框按主人体�
     assert.ok(src.includes('api("self-upgrade")'), '升级臂存在')
   })
 
-  it('② 确认框文案键与按钮键零残留（dead key 清理）', () => {
-    assert.ok(!src.includes('selfupgrade.confirm'), 'confirm 句式键已退役')
-    assert.ok(!src.includes('selfupgrade.go'), '确认按钮键已退役')
+  it('② 确认框文案键与按钮键零残留（dead key 清理；调用面 + 词典面双扫——ADR-0023 T1）', () => {
+    assert.ok(!src.includes('selfupgrade.confirm') && !i18nSrc.includes('selfupgrade.confirm'), 'confirm 句式键已退役（双面）')
+    assert.ok(!src.includes('selfupgrade.go') && !i18nSrc.includes('selfupgrade.go'), '确认按钮键已退役（双面）')
   })
 
   it('③ needsRestart 忠实透传响应值（R10）：res.needsRestart ?? true——applied→false 不弹重启横幅', () => {
@@ -184,8 +186,8 @@ describe('0.10.4 对账改判补横幅（结构钉 + 文案键双字典）', () 
     assert.ok(src.includes('lookup("selfupgrade.reconciled.failed"'), '未完成 warn 横幅锚')
   })
 
-  it('② done/failed 两键双语各一枚（zh/en）', () => {
-    assert.equal(count('"selfupgrade.reconciled.done": "'), 2)
-    assert.equal(count('"selfupgrade.reconciled.failed": "'), 2)
+  it('② done/failed 两键双语各一枚（zh/en；i18n.js 词典面——ADR-0023 T1）', () => {
+    assert.equal(i18nSrc.split('"selfupgrade.reconciled.done": "').length - 1, 2)
+    assert.equal(i18nSrc.split('"selfupgrade.reconciled.failed": "').length - 1, 2)
   })
 })

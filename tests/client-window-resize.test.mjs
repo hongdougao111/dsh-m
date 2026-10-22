@@ -129,9 +129,9 @@ describe("bundle 锚（需先 npm run build）", { skip: !existsSync(join(dirnam
   it("手柄计数：DOM 3 + CSS 规则 3 = 6（评审 R2 语义校准）", () => {
     assert.equal(count("dshm-rz"), 6, `dshm-rz 应为 6 次（3 DOM + 3 CSS），实际 ${count("dshm-rz")}`);
   });
-  it("中文文案走源结构锚（bundle 内中文被 ascii 转义，禁作 bundle 锚）", () => {
-    const src = readFileSync(join(root, "src", "client", "main.jsx"), "utf8");
-    assert.ok(src.split("拖边角调大小").length - 1 >= 1, "main.jsx 应含中文提示语（源锚）");
+  it("中文文案走源结构锚（bundle 内中文被 ascii 转义，禁作 bundle 锚；词典面读 i18n.js——ADR-0023 T1）", () => {
+    const i18nSrc = readFileSync(join(root, "src", "client", "i18n.js"), "utf8");
+    assert.ok(i18nSrc.split("拖边角调大小").length - 1 >= 1, "i18n.js 应含中文提示语（源锚）");
     assert.equal(bundle.includes("拖边角调大小"), false, "bundle 内该中文应已被 \\uXXXX 转义（机理自证）");
   });
 });

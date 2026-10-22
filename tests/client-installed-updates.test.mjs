@@ -82,9 +82,10 @@ describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表�
     assert.equal(count('setInstallNote({ id: it.id, kind: "warn", text: degraded.text });'), 1)
   })
 
-  it('④ 文案键双字典同层：op.degraded zh 逐字 + en 键在位', () => {
-    assert.ok(src.includes('"op.degraded": "升级失败：新版安装未成功，已自动恢复旧版 {restoredTo}——插件当前可用，可稍后重试。"'), 'zh 字典逐字锚')
-    assert.equal(count('"op.degraded":'), 2, 'zh/en 各一枚')
+  it('④ 文案键双字典同层：op.degraded zh 逐字 + en 键在位（i18n.js 词典面——ADR-0023 T1）', () => {
+    const i18nSrc = readFileSync(new URL('../src/client/i18n.js', import.meta.url), 'utf8')
+    assert.ok(i18nSrc.includes('"op.degraded": "升级失败：新版安装未成功，已自动恢复旧版 {restoredTo}——插件当前可用，可稍后重试。"'), 'zh 字典逐字锚')
+    assert.equal(i18nSrc.split('"op.degraded":').length - 1, 2, 'zh/en 各一枚')
   })
 })
 

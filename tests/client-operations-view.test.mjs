@@ -155,6 +155,8 @@ describe('opRowVm：方向/来源/版本/耗时派生与优雅回退', () => {
 
 describe('main.jsx 操作记录增强接线结构锚', () => {
   const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+  // ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）
+  const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
   it('消费 operations-view 视图模型', () => {
     assert.ok(src.includes('require("./operations-view.js")'), '必须 require ./operations-view.js')
     assert.ok(src.includes('groupOpsByDay(finished)'), '已结束区必须按日分组')
@@ -167,17 +169,17 @@ describe('main.jsx 操作记录增强接线结构锚', () => {
     assert.ok(src.includes('dsvm-opdir'), '开关方向徽章')
     assert.ok(src.includes('dsvm-opver'), '升级版本串')
     assert.ok(src.includes('dsvm-opdur'), '耗时列')
-    assert.ok(src.includes('"op.day.today"'), '今天组头键')
-    assert.ok(src.includes('"op.day.yesterday"'), '昨天组头键')
-    assert.ok(src.includes('settings.ops.group.done.n'), '已结束计数键')
+    assert.ok(i18nSrc.includes('"op.day.today"'), '今天组头键（i18n.js）')
+    assert.ok(i18nSrc.includes('"op.day.yesterday"'), '昨天组头键（i18n.js）')
+    assert.ok(i18nSrc.includes('settings.ops.group.done.n'), '已结束计数键（i18n.js）')
   })
   it('旧病灶负向锚：社区开关专属的方向渲染已退役（被 opRowVm.dir 泛化取代）', () => {
     assert.equal(src.includes('const targetText'), false, 'targetText 局部派生不得残留')
-    assert.equal(src.includes('"settings.ops.group.done"'), false, '无计数旧键不得残留（已被 group.done.n 取代）')
+    assert.equal(src.includes('"settings.ops.group.done"') || i18nSrc.includes('"settings.ops.group.done"'), false, '无计数旧键不得残留（调用面+词典面双扫，已被 group.done.n 取代）')
   })
   it('旧病灶负向锚：「对话」来源徽章已退役（0.9.76 自纠——meta.session 是泵所有权标记非来源语义）', () => {
     assert.equal(src.includes('dsvm-opsession'), false, '来源徽章类名不得残留')
-    assert.equal(src.includes('op.session.tip'), false, '来源徽章 i18n 键不得残留')
+    assert.equal(src.includes('op.session.tip') || i18nSrc.includes('op.session.tip'), false, '来源徽章 i18n 键不得残留（调用面+词典面双扫）')
     const vmSrc = readFileSync(join(root, 'src/client/operations-view.js'), 'utf8')
     assert.equal(vmSrc.includes('session:'), false, 'opRowVm 不得派生 session 字段')
   })
@@ -242,17 +244,19 @@ describe('外部记录 × 视图模型（渠道徽标/单条移除出口/按日�
 
 describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
   const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+  // ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）
+  const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
   it('⑤渠道徽标渲染 + i18n 键在位', () => {
     assert.ok(src.includes('dsvm-opchan'), '渠道徽标类名')
     assert.ok(src.includes('channelLabelKey('), '徽标文案必须走 channelLabelKey')
-    assert.ok(src.includes('"op.channel.host-tool": "Agent 工具"'), 'ZH 键：Agent 工具（Q2b）')
-    assert.ok(src.includes('"op.channel.cli": "命令行"'), 'ZH 键：命令行（Q2b）')
-    assert.ok(src.includes('"op.channel.external": "外部"'), 'ZH 键：兜底外部（R1-4）')
-    assert.ok(src.includes('"op.kind.self-upgrade"'), '新 kind：self-upgrade')
-    assert.ok(src.includes('"op.kind.desktop-install"'), '新 kind：desktop-install')
-    assert.ok(src.includes('"op.kind.desktop-upgrade"'), '新 kind：desktop-upgrade')
-    assert.ok(src.includes('"op.kind.desktop-uninstall"'), '新 kind：desktop-uninstall')
-    assert.ok(src.includes('"op.kind.desktop-toggle"'), '新 kind：desktop-toggle')
+    assert.ok(i18nSrc.includes('"op.channel.host-tool": "Agent 工具"'), 'ZH 键：Agent 工具（Q2b，i18n.js）')
+    assert.ok(i18nSrc.includes('"op.channel.cli": "命令行"'), 'ZH 键：命令行（Q2b，i18n.js）')
+    assert.ok(i18nSrc.includes('"op.channel.external": "外部"'), 'ZH 键：兜底外部（R1-4，i18n.js）')
+    assert.ok(i18nSrc.includes('"op.kind.self-upgrade"'), '新 kind：self-upgrade（i18n.js）')
+    assert.ok(i18nSrc.includes('"op.kind.desktop-install"'), '新 kind：desktop-install（i18n.js）')
+    assert.ok(i18nSrc.includes('"op.kind.desktop-upgrade"'), '新 kind：desktop-upgrade（i18n.js）')
+    assert.ok(i18nSrc.includes('"op.kind.desktop-uninstall"'), '新 kind：desktop-uninstall（i18n.js）')
+    assert.ok(i18nSrc.includes('"op.kind.desktop-toggle"'), '新 kind：desktop-toggle（i18n.js）')
   })
   it('⑥单条 ✕ 出口改走 canRemoveRow（内联判定退役）', () => {
     assert.ok(src.includes('canRemoveRow(r)'), '行渲染必须消费 canRemoveRow')
@@ -261,7 +265,7 @@ describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
   it('⑦外部 failed 行单条 ✕ 接线锚（0.9.82 修订 R2-3）', () => {
     assert.ok(src.includes('api("external-operations-remove"'), '服务端 per-id 删除 method 调用')
     assert.ok(src.includes('removeExternal('), 'overlay 按 id 剔除（墓碑拦在途 fetch 复活）')
-    assert.ok(src.includes('"op.remove.failed"'), '失败 toast i18n 键（{err} 插值）')
+    assert.ok(i18nSrc.includes('"op.remove.failed"'), '失败 toast i18n 键（{err} 插值，i18n.js）')
     assert.ok(src.includes('onRemove(r)'), '行渲染传整行 record（onOpsRemove 按 channel 分流）')
     const view = readFileSync(join(root, 'src/client/operations-view.js'), 'utf8')
     assert.ok(view.includes("return r.status === 'failed'"), 'canRemoveRow 外部 failed 放行')
@@ -277,7 +281,7 @@ describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
   })
   it('⑦已结束计数 = 合并后总数（R1-7）：渲染截断 slice(-50) 照旧、计数用全量', () => {
     assert.ok(src.includes('finishedAll'), '全量终态列表变量在位')
-    assert.ok(src.includes('settings.ops.group.done.n', ), '计数键沿用')
+    assert.ok(i18nSrc.includes('settings.ops.group.done.n'), '计数键沿用（i18n.js）')
     assert.ok(/group\.done\.n.*finishedAll\.length/s.test(src), '计数实参 = finishedAll.length')
   })
   it('外部记录 overlay 不写 localStorage（R1-3 结构锚）', () => {

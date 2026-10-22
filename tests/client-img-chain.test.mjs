@@ -24,6 +24,9 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const mainSrc = readFileSync(join(here, '../src/client/main.jsx'), 'utf8')
+// ADR-0023 第一刀：词典面断言改读 i18n.js；CSS 面（含切片）改读 styles.js
+const i18nSrc = readFileSync(join(here, '../src/client/i18n.js'), 'utf8')
+const stylesSrc = readFileSync(join(here, '../src/client/styles.js'), 'utf8')
 
 const RAW_URL = 'https://raw.githubusercontent.com/elysia395/dsh-wallpaper-engine/HEAD/docs/images/main-interface.gif'
 
@@ -174,15 +177,15 @@ describe('main.jsx 接线源锚（实施计划 Task 3：Shot + 截图条四处�
     assert.ok(lbSeg.includes('chain.retry'), '重试接 chain.retry')
     assert.ok(/h\(ExtLink, \{ href: shots\[index\] \}/.test(lbSeg), '打开原图 ExtLink href=原 URL')
     assert.ok(lbSeg.includes('lookup("lb.fail")') && lbSeg.includes('lookup("lb.retry")') && lbSeg.includes('lookup("lb.open")'), '三 i18n 键接线')
-    assert.ok(mainSrc.includes('"lb.fail": "图片加载失败"') && mainSrc.includes('"lb.retry": "重试"') && mainSrc.includes('"lb.open": "打开原图"'), 'ZH 三键')
-    assert.ok(/"lb\.fail": "Failed to load image"/.test(mainSrc) && mainSrc.includes('"lb.retry": "Retry"') && mainSrc.includes('"lb.open": "Open original"'), 'EN 三键')
-    assert.ok(mainSrc.includes('.dsvm-lbfail{'), '占位 CSS 在')
+    assert.ok(i18nSrc.includes('"lb.fail": "图片加载失败"') && i18nSrc.includes('"lb.retry": "重试"') && i18nSrc.includes('"lb.open": "打开原图"'), 'ZH 三键（i18n.js）')
+    assert.ok(/"lb\.fail": "Failed to load image"/.test(i18nSrc) && i18nSrc.includes('"lb.retry": "Retry"') && i18nSrc.includes('"lb.open": "Open original"'), 'EN 三键（i18n.js）')
+    assert.ok(stylesSrc.includes('.dsvm-lbfail{'), '占位 CSS 在（styles.js）')
   })
 })
 
 describe('详情截图条统一瓷砖 CSS 锚（0.9.73：修「大小不一 + flex 收缩外溢盖邻图」）', () => {
-  // 切片锚：shotrow 规则起 → 灯箱 v2 注释止（之间的 CSS 块只属于截图条）
-  const cssSeg = mainSrc.slice(mainSrc.indexOf('.dsvm-shotrow{'), mainSrc.indexOf('/* 灯箱 v2'))
+  // 切片锚：shotrow 规则起 → 灯箱 v2 注释止（之间的 CSS 块只属于截图条；ADR-0023 第一刀：切片随 CSS 迁 styles.js 内重定）
+  const cssSeg = stylesSrc.slice(stylesSrc.indexOf('.dsvm-shotrow{'), stylesSrc.indexOf('/* 灯箱 v2'))
   it('统一瓷砖：box 禁收缩 + 固定 176×110 + overflow:hidden；img 满铺 cover 顶锚定；行 snap 翻页', () => {
     assert.ok(cssSeg.includes('.dsvm-shotrow{display:flex;gap:6px;overflow-x:auto;padding:2px 0;scroll-snap-type:x proximity}'), '行保持横滚 + scroll-snap proximity')
     assert.ok(/\.dsvm-shotbox\{flex:0 0 auto;width:176px;height:110px;overflow:hidden;/.test(cssSeg), 'box：flex:0 0 auto（几何与图片多少/加载态无关）+ 固定瓷砖 + 外溢兜底')

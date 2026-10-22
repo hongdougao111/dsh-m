@@ -9,10 +9,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { ZH, EN } from '../src/client/i18n.js'
 
-const dictSrc = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
-const dictKeys = new Set()
-for (const m of dictSrc.matchAll(/"([a-zA-Z0-9._-]+)":\s*"/g)) dictKeys.add(m[1])
+// ADR-0023 第一刀：词典出仓 i18n.js——键集直接由模块对象构建（正则抽 main.jsx 退役）
+const dictKeys = new Set([...Object.keys(ZH), ...Object.keys(EN)])
 
 const auditTargets = [
   { file: '../src/client/main.jsx' },

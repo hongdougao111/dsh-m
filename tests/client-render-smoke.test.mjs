@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+// ADR-0023 第一刀：词典定义面锚改读 i18n.js；CSS 锚改读 styles.js（调用面锚仍读 main.jsx）
+const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
+const stylesSrc = readFileSync(join(root, 'src/client/styles.js'), 'utf8')
 // 入口必须与 main.jsx 同目录（相对 require ./market-state.js 等才能解析）；构建后即删
 const dir = join(root, 'src/client')
 const entry = join(dir, '.render-smoke-entry.jsx')
@@ -75,8 +78,8 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
   })
 
   it('插件卡片列数按容器宽度自适应，不受固定两列或视口断点限制', () => {
-    assert.match(src, /\.dshm-cards\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,360px\),1fr\)\);gap:8px\}/, '按 360px 最小卡宽与 8px 间距自动填列，并均分剩余宽度')
-    assert.doesNotMatch(src, /@media\s*\(\s*max-width\s*:\s*680px\s*\)\s*\{\s*\.dshm-cards\s*\{[^}]*1fr/, '不再用视口断点覆盖容器实际宽度（含空白/等价写法形态）')
+    assert.match(stylesSrc, /\.dshm-cards\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,360px\),1fr\)\);gap:8px\}/, '按 360px 最小卡宽与 8px 间距自动填列，并均分剩余宽度')
+    assert.doesNotMatch(stylesSrc, /@media\s*\(\s*max-width\s*:\s*680px\s*\)\s*\{\s*\.dshm-cards\s*\{[^}]*1fr/, '不再用视口断点覆盖容器实际宽度（含空白/等价写法形态）')
   })
 
   // 0.9.4 Windows Desktop 全屏修复（实机回归：全屏后面板头部 tab/还原键落在壳 40px
@@ -85,8 +88,8 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
   // 消费壳在 html 上设的 --dsh-windows-titlebar-height 让出该带。该变量仅 Windows Desktop
   // 宿主存在，DSH Web/浏览器回落 0px，行为零漂移。）
   it('Windows 标题栏让位：全屏 top 与浮动态 padding-top 消费壳标题栏变量，Web 回落 0', () => {
-    assert.match(src, /\.dshm-overlay\.full\{[^}]*top:var\(--dsh-windows-titlebar-height,0px\)\}/, '全屏态顶部让位在')
-    assert.match(src, /padding:max\(24px,var\(--dsh-windows-titlebar-height,0px\)\) 16px 24px/, '浮动态 padding-top 下限在（矮窗口浮板不被拖拽带压住）')
+    assert.match(stylesSrc, /\.dshm-overlay\.full\{[^}]*top:var\(--dsh-windows-titlebar-height,0px\)\}/, '全屏态顶部让位在')
+    assert.match(stylesSrc, /padding:max\(24px,var\(--dsh-windows-titlebar-height,0px\)\) 16px 24px/, '浮动态 padding-top 下限在（矮窗口浮板不被拖拽带压住）')
   })
 
   it('InstalledTab 空数据渲染不抛', () => {
@@ -127,7 +130,7 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
     assert.match(src, /const chipsSignature = JSON\.stringify\(chips\.map/, '分类内容签名而非不稳定的对象引用')
     assert.match(src, /\[chipsSignature, active, expanded, zone, stuck, rowHeight, measure\]/, '布局测量不依赖自身的 geom')
     assert.match(src, /if \(existing\.querySelector\("\.dshm-panel"\)\) return;\s*existing\.remove\(\);/, '崩溃遗留空容器不得永久阻挡重新打开')
-    assert.match(src, /\.dshm-chips\.dshm-chips-clip\.dshm-chips-gutter\.dshm-chips-reserve\{padding-right:calc\(var\(--dshm-clip-gutter,96px\) \+ 60px\)\}/, '社区区 +N/筛选右侧槽不被 gutter 覆盖')
+    assert.match(stylesSrc, /\.dshm-chips\.dshm-chips-clip\.dshm-chips-gutter\.dshm-chips-reserve\{padding-right:calc\(var\(--dshm-clip-gutter,96px\) \+ 60px\)\}/, '社区区 +N/筛选右侧槽不被 gutter 覆盖')
     assert.match(src, /const moreLeft = geom \? geom\.lastVisRight \+ 6 : 0;/, '+N 动态紧贴末可见 chip，而非固定在筛选旁')
     assert.match(src, /const moreHeight = geom \? geom\.lastVisHeight/, '+N 框高来自最后可见分类的实测高度')
     assert.match(src, /height: `\$\{moreHeight\}px`/, '+N 显式应用与分类相同的边框高度')
@@ -327,8 +330,8 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
     assert.match(src, /market\.empty\.unavailable/, 'unavailable 主文案分支')
     assert.match(src, /market\.empty\.category/, '分类空桶文案分支')
     for (const k of ['market.retry', 'market.empty.category', 'market.empty.unavailable']) {
-      assert.ok(new RegExp(`"${k}":`).test(src), `键 ${k} 存在`)
-      assert.equal(src.split(`"${k}":`).length - 1, 2, `键 ${k} ZH/EN 各一次`)
+      assert.ok(new RegExp(`"${k}":`).test(i18nSrc), `键 ${k} 存在（i18n.js 词典）`)
+      assert.equal(i18nSrc.split(`"${k}":`).length - 1, 2, `键 ${k} ZH/EN 各一次（i18n.js）`)
     }
   })
 
@@ -354,19 +357,19 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
   it('U3/U7：0 计数桶显式 0 + zero 样式 + 跨桶 title 说明', () => {
     const html = renderToString(h(components.__ZoneChips, { zone: 'primary', counts: { essentials: 4, 'cui-picks': 0, 'self-dev': 8, 'tencent-lighthouse': 3, watchlist: 3 }, labels: null, active: null, onPick: () => {} }))
     assert.ok(html.includes('zero'), '0 计数桶带 zero 类')
-    assert.match(src, /\.dshm-chip\.zero\{opacity/, 'zero 降透明 CSS 在')
-    assert.match(src, /chips\.crossbucket\.tip/, '跨桶说明键存在')
+    assert.match(stylesSrc, /\.dshm-chip\.zero\{opacity/, 'zero 降透明 CSS 在')
+    assert.match(i18nSrc, /chips\.crossbucket\.tip/, '跨桶说明键存在（i18n.js 词典）')
   })
 })
 
 describe('0.9.76「版本无关」徽章退役（源码断言）——展示层两处退役、Modal Compat 行为唯一权威呈现', () => {
   it('市场卡与 Modal 头不再渲染解耦徽章；徽章 i18n 键退役', () => {
     assert.equal(src.includes('lookup("badge.decoupled")'), false, '卡片/Modal 头徽章渲染调用不得残留')
-    assert.equal(src.includes('badge.decoupled.tip'), false, '徽章 tooltip 键不得残留')
-    assert.equal(src.includes('"badge.decoupled"'), false, 'i18n 徽章键不得残留')
+    assert.equal(i18nSrc.includes('badge.decoupled.tip'), false, '徽章 tooltip 键不得残留（词典面）')
+    assert.equal(i18nSrc.includes('"badge.decoupled"'), false, 'i18n 徽章键不得残留（词典面）')
   })
   it('Modal Compat 行保留为唯一权威呈现；snapshotOf 数据字段照常透传（收藏/快照完整性）', () => {
-    assert.ok(src.includes('modal.decoupled.label') && src.includes('modal.decoupled.value'), 'Compat 行 i18n 键在')
+    assert.ok(i18nSrc.includes('modal.decoupled.label') && i18nSrc.includes('modal.decoupled.value'), 'Compat 行 i18n 键在（词典面）')
     assert.match(src, /it\.decoupled === true \? kv\(lookup\("modal\.decoupled\.label"\)/, 'Compat 行条件渲染在')
     assert.match(src, /"verified", "audience", "decoupled"\]/, 'snapshotOf 数据字段保留')
   })
@@ -375,22 +378,22 @@ describe('0.9.76「版本无关」徽章退役（源码断言）——展示层�
 describe('2026-10-13「已实测」徽章退役（B 方案）——卡面徽章三处退役、byline 灰字承接、Modal 实测版本行为唯一权威呈现', () => {
   it('市场卡/收藏卡/Modal 头徽章渲染调用与 i18n 键退役；badges 应标记例外而非常态', () => {
     assert.equal(src.includes('lookup("badge.verified")'), false, '徽章渲染调用不得残留')
-    assert.equal(src.includes('"badge.verified"'), false, 'i18n 徽章键不得残留（ZH/EN 均退役）')
+    assert.equal(i18nSrc.includes('"badge.verified"'), false, 'i18n 徽章键不得残留（ZH/EN 均退役，词典面）')
   })
   it('byline 灰字承接（低显著度，末位=最新复验版本）；Modal「实测版本」行保留为唯一权威呈现', () => {
     assert.match(src, /const verifiedByline = \(it\) =>/, 'byline 灰字构造器在')
     assert.match(src, /verifiedByline\(it\),/, '市场卡 byline 接线在')
     assert.match(src, /lookup\("byline\.verified", \{ v: it\.verified\[it\.verified\.length - 1\] \}\), title: it\.verified\.join\("、"\)/, '灰字取末位（时间序最新）+ tooltip 全量清单')
-    assert.equal(src.split('"byline.verified":').length - 1, 2, 'byline.verified ZH/EN 各一次（键定义计口径，带冒号）')
+    assert.equal(i18nSrc.split('"byline.verified":').length - 1, 2, 'byline.verified ZH/EN 各一次（键定义计口径，带冒号，i18n.js）')
     assert.match(src, /it\.community !== true && Array\.isArray\(it\.verified\) && it\.verified\.length \? kv\(lookup\("modal\.verified"\)/, 'Modal「实测版本」行条件渲染在（唯一权威呈现）')
   })
 })
 
 describe('0.9.76 分类行吸顶高频跳动修复（源码断言）——滚动锚定在面板滚动容器停用', () => {
   it('.dshm-body 关闭 overflow-anchor（断自激循环驱动器）；吸顶/哨兵几何不动', () => {
-    assert.match(src, /\.dshm-body\{[^}]*overflow-anchor:none/, '滚动锚定停用在位（.dshm-body 是面板唯一滚动容器）')
-    assert.ok(src.includes('position:sticky;top:-14px'), '吸顶几何不变（哨兵契约依赖 top:-14px）')
-    assert.ok(src.includes('top: "-5px"'), '哨兵 -5px 契约不变')
+    assert.match(stylesSrc, /\.dshm-body\{[^}]*overflow-anchor:none/, '滚动锚定停用在位（.dshm-body 是面板唯一滚动容器）')
+    assert.ok(stylesSrc.includes('position:sticky;top:-14px'), '吸顶几何不变（哨兵契约依赖 top:-14px）')
+    assert.ok(src.includes('top: "-5px"'), '哨兵 -5px 契约不变（JSX 面）')
   })
 })
 
@@ -446,26 +449,26 @@ describe('panel resize 渲染接线（T2）——三手柄 restore 在/full 无 
 
 describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结构 / 设置网格容器门控', () => {
   it('头部两行重排断点 600→720（resize min 640 恒入两行区）；title/seg 基础 nowrap 防挤压带', () => {
-    assert.ok(src.includes('@container (max-width:720px){'), '容器断点 720 在')
-    assert.ok(!src.includes('@container (max-width:600px){'), '旧 600 容器断点已退役')
-    assert.ok(src.includes('.dshm-title{font-weight:600;font-size:15px;margin-right:2px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}'), 'title nowrap+ellipsis 在（flex 子项块化，ellipsis 生效）')
-    assert.ok(src.includes('display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}'), 'seg button 基础 nowrap 在')
-    assert.ok(src.includes('@media (max-width:600px){.dshm-overlay{padding:8px}}'), '视口 600 overlay 断点不动')
+    assert.ok(stylesSrc.includes('@container (max-width:720px){'), '容器断点 720 在')
+    assert.ok(!stylesSrc.includes('@container (max-width:600px){'), '旧 600 容器断点已退役')
+    assert.ok(stylesSrc.includes('.dshm-title{font-weight:600;font-size:15px;margin-right:2px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}'), 'title nowrap+ellipsis 在（flex 子项块化，ellipsis 生效）')
+    assert.ok(stylesSrc.includes('display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}'), 'seg button 基础 nowrap 在')
+    assert.ok(stylesSrc.includes('@media (max-width:600px){.dshm-overlay{padding:8px}}'), '视口 600 overlay 断点不动')
   })
 
   it('详情弹窗：✕ 与「安装」双端常驻（modalbody 结构化滚动）', () => {
     assert.ok(src.includes('className: "dsvm-modalbody"'), 'body 包裹层在')
-    assert.match(src, /\.dsvm-modalbox\{[^}]*overflow:hidden/, 'box 攂滚动改 hidden')
-    assert.ok(!/\.dsvm-modalbox\{[^}]*overflow:auto/.test(src), 'box 不再整体滚动')
-    assert.match(src, /\.dsvm-modalbody\{overflow:auto;min-height:0;overscroll-behavior:contain/, 'body 滚动 + min-height:0 + 防链式在')
+    assert.match(stylesSrc, /\.dsvm-modalbox\{[^}]*overflow:hidden/, 'box 攂滚动改 hidden')
+    assert.ok(!/\.dsvm-modalbox\{[^}]*overflow:auto/.test(stylesSrc), 'box 不再整体滚动')
+    assert.match(stylesSrc, /\.dsvm-modalbody\{overflow:auto;min-height:0;overscroll-behavior:contain/, 'body 滚动 + min-height:0 + 防链式在')
     const m = src.slice(src.indexOf('function DetailModal('), src.indexOf('// ---------- 市场页'))
     assert.ok(m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-kv') && m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-modalactions'), 'body 包住 kv 到 actions 之前的中段')
   })
 
   it('设置网格三列门控 = 容器宽 ≥1100 而非全屏（panel resize 伴生修复；0.9.91 三列 4:7:4 左右窄卡等宽）', () => {
-    assert.ok(src.includes('@container (min-width:1100px){'), '容器门控在')
-    assert.ok(src.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '三列规则在（容器版，4:7:4）')
-    assert.ok(!src.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '.full 三列规则已退役')
-    assert.ok(src.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
+    assert.ok(stylesSrc.includes('@container (min-width:1100px){'), '容器门控在')
+    assert.ok(stylesSrc.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '三列规则在（容器版，4:7:4）')
+    assert.ok(!stylesSrc.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '.full 三列规则已退役')
+    assert.ok(stylesSrc.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
   })
 })
