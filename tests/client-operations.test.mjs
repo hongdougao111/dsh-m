@@ -503,8 +503,11 @@ describe('restoreRecords 对账匹配放宽（0.10.6 挂账 1 收口）', () => 
 describe('恢复对账改判补横幅（0.10.4，main.jsx 源锚）', () => {
   it('恢复流程消费 reconciledAfterRestart 标记并补完成横幅（0.10.3 事件实证：成功结局会随面板重载静默）', () => {
     const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
-    assert.ok(src.includes('lookup("upgrade.reconciled.done"'), '恢复对账完成横幅锚')
-    assert.ok(src.includes('r.meta.reconciledAfterRestart'), '改判标记消费在')
+    // ADR-0023 第二刀：编排迁 panel-ops.js——消费锚改读 panel-ops 源 + 行为测试双保险（tests/client-panel-ops）
+    const po = readFileSync(new URL('../src/client/panel-ops.js', import.meta.url), 'utf8')
+    assert.ok(po.includes("i18nKey: 'upgrade.reconciled.done'"), '恢复对账完成横幅键（panel-ops 计划函数）')
+    assert.ok(po.includes('r.meta.reconciledAfterRestart'), '改判标记消费在（panel-ops）')
+    assert.ok(src.includes('lookup(n.i18nKey, n.params)'), '适配器按计划渲染通知文案（main.jsx）')
     // 0.10.5：横幅键必须在双字典定义（0.10.4 真机实证漏定义 → 用户看到裸键名 toast）
     // ADR-0023 T1：词典面改读 i18n.js
     const i18nSrc = readFileSync(new URL('../src/client/i18n.js', import.meta.url), 'utf8')
@@ -514,19 +517,21 @@ describe('恢复对账改判补横幅（0.10.4，main.jsx 源锚）', () => {
 
 // ---------- 0.10.7（A 方案，主人裁决）：对账补横幅一次性化——独立已读集合 + 先落账后补报 ----------
 describe('对账补横幅一次性化（0.10.7，main.jsx 源锚 + 已读集合纯函数）', () => {
-  it('① restore 时序反转：replaceAll（落账）先于补横幅 lookup；persist 抛错静默放弃该次补报并留诊断', () => {
+  it('① restore 时序反转：replaceAll（落账）先于补报 notify；persist 抛错静默放弃该次补报并留诊断', () => {
     const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
-    const idxReplace = src.indexOf('opsStore.replaceAll(restored);')
-    const idxNotify = src.indexOf('lookup("upgrade.reconciled.done"')
+    // ADR-0023 第二刀：适配器锚——replaceAll(plan.replacements) 先于 lookup(n.i18nKey) 补报
+    const idxReplace = src.indexOf('opsStore.replaceAll(plan.replacements);')
+    const idxNotify = src.indexOf('lookup(n.i18nKey, n.params)')
     assert.ok(idxReplace >= 0 && idxNotify > idxReplace, '先落账后补报（弹的时候账已落）')
     assert.ok(src.includes('restore persist failed'), 'persist 抛错诊断留痕（Q5-a）')
   })
 
-  it('② 已读集合接线：读 → has 去重 → add → 写回（独立 localStorage 键，记录生命周期外）', () => {
+  it('② 已读集合接线：读（适配器）→ has 去重（计划函数）→ add + 写回（适配器逐条落账序）', () => {
     const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
-    assert.ok(src.includes('readReconcileNotified('), '读已读集合')
-    assert.ok(src.includes('seen.has(key)'), '去重判在')
-    assert.ok(src.includes('writeReconcileNotified('), '写回已读集合')
+    const po = readFileSync(new URL('../src/client/panel-ops.js', import.meta.url), 'utf8')
+    assert.ok(src.includes('readReconcileNotified('), '读已读集合（适配器）')
+    assert.ok(po.includes('seenKeys.has(key)'), '去重判在（panel-ops 计划函数）')
+    assert.ok(src.includes('seen.add(n.dedupeKey);') && src.includes('writeReconcileNotified('), '逐条 add → 写回（适配器，崩溃窗口语义与 0.10.7 逐字节一致）')
   })
 
   it('③ readReconcileNotified：缺键/损坏 JSON/非数组 → 空 Set；合法 → Set', () => {

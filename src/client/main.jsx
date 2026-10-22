@@ -27,7 +27,9 @@ const { pickPayload, parseToolArgs } = require("./tool-view.js");
 const { RESTART_POLL_MS, RESTART_DEADLINE_MS, nextRestartWait, isAmbiguousRestartRequestError } = require("./restart-wait.js");
 const { refreshAfterMutation } = require("./view-refresh.js");
 const { applyInstalledUpdates, installedUpdateStats } = require("./installed-updates.js");
-const { createOperationsStore, restoreRecords, createOpsPump, opAppliesTo, readReconcileNotified, writeReconcileNotified, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
+const { restoreRecords, opAppliesTo, readReconcileNotified, writeReconcileNotified, TERMINAL_CLEARABLE, REGISTRY_DEFAULT_TARGET } = require("./operations.js");
+// 面板操作接线（GLOSSARY / ADR-0023 第二刀）：泵持有者 + 显式绑定 + 对账编排纯函数 + 横幅判定单源
+const { getSharedOpsStore, getSharedOpsPump, bindPanelOps, unbindPanelOps, recordSettingsOp, planReconcileActions, restartBannerDecision } = require("./panel-ops.js");
 const { groupOpsByDay, opRowVm, opUpgradeMeta, canRemoveRow, channelLabelKey } = require("./operations-view.js");
 const { createFavoritesStore, partitionStale } = require("./favorites.js");
 const { readSelfCheckCache, writeSelfCheckCache, clearSelfCheckCache, deriveChipState } = require("./self-check.js");
@@ -1272,7 +1274,8 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
     oc.buildsSuffix(res) +
     (res.bundleWarning === "no-patch-layer" ? lookup("notify.bundlewarning") : "");
   const installDone = (it2, res) => {
-    notify({ kind: "ok", needsRestart: true, text: installResultText(res) });
+    // ADR-0023 第二刀：横幅判定单源（install 字面 true）
+    notify({ kind: "ok", needsRestart: restartBannerDecision("install", res).needsRestart, text: installResultText(res) });
     setInstallNote({ id: it2.id, kind: "ok", text: installResultText(res) });
   };
 
@@ -1319,8 +1322,9 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
         setInstallNote({ id: it.id, kind: "warn", text: degraded.text });
       } else {
         // 0.9.94：升级成功文案（from/to 箭头 + builds 后缀 + 0.9.22 生效判定三态分流，client-only 不弹重启横幅）单源 op-outcome
+        // ADR-0023 第二刀：needsRestart 判定单源 restartBannerDecision（委派 upgradeNotify 三态）；文案仍单源 op-outcome
         const ok = oc.upgradeOkText(res);
-        notify({ kind: "ok", needsRestart: ok.needsRestart, text: ok.text });
+        notify({ kind: "ok", needsRestart: restartBannerDecision("upgrade", res).needsRestart, text: ok.text });
         setInstallNote({ id: it.id, kind: "ok", text: ok.text });
       }
       await (onMutation ? onMutation() : undefined);
@@ -1780,7 +1784,8 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
       }
       const note = toggleNoticeKeys(res);
       const extra = (res.warnings && res.warnings.length ? `（${res.warnings.join("；")}）` : "");
-      notify({ kind: "ok", needsRestart: note.needsRestart, text: lookup(note.textKey, note.params) + extra });
+      // ADR-0023 第二刀：needsRestart 判定单源（委派 toggleNoticeKeys：live→false/restart→true）；文案仍走 note.textKey
+      notify({ kind: "ok", needsRestart: restartBannerDecision("toggle", res).needsRestart, text: lookup(note.textKey, note.params) + extra });
       // toggle 只重取已装视图：开关不改变 installed-ness 与版本，市场×2/updates 无需跟随
       // （原 refreshViews 五连请求 → 1 个；渲染churn 同步下降，不稳定窗口缩短）
       await reload();
@@ -1803,7 +1808,8 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
       const res = await ops.runOp("uninstall", it.pkg, () => api("uninstall", { pkg: it.pkg }));
       notify({
         kind: "ok",
-        needsRestart: true,
+        // ADR-0023 第二刀：横幅判定单源（uninstall 字面 true）
+        needsRestart: restartBannerDecision("uninstall").needsRestart,
         text: lookup("notify.uninstalled", { pkg: res.pkg }) +
           (res.liveDisabled ? lookup("notify.livedisabled") : "") +
           (res.leftovers && res.leftovers.length ? lookup("notify.leftovers", { paths: res.leftovers.join(", ") }) : ""),
@@ -1831,8 +1837,9 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
         notify({ kind: "warn", text: degraded.text });
       } else {
         // 0.9.94：升级成功文案（含 0.9.22 生效判定三态分流，缺席 = github 源等未判定，维持现状横幅）单源 op-outcome
+        // ADR-0023 第二刀：needsRestart 判定单源 restartBannerDecision（委派 upgradeNotify 三态）；文案仍单源 op-outcome
         const ok = oc.upgradeOkText(res);
-        notify({ kind: "ok", needsRestart: ok.needsRestart, text: ok.text });
+        notify({ kind: "ok", needsRestart: restartBannerDecision("upgrade", res).needsRestart, text: ok.text });
       }
       await (onMutation ? onMutation() : reload());
     } catch (e) {
@@ -2417,25 +2424,11 @@ function FavoriteZone({ favorites, onOpen }) {
   );
 }
 
-// ---------- 全局操作记录（0.7.0 Task 13 + 审计碰撞修正 + 评审 P4：泵迁 operations.js） ----------
-/** 模块级单例（审计碰撞·洞1）：per-hook 实例会让关面板后的旧 runOp 闭包与新面板各自
- *  全量 persist 互相覆盖丢记录——排队窗口越长越恶性。 */
-const opsStore = createOperationsStore(typeof window !== "undefined" && window.localStorage ? window.localStorage : null);
-/** 泵上下文（MarketPanel 渲染时注册；卸载置空——记录本体持久在 localStorage）。 */
-let opsPumpCtx = null;
-/** 单一执行泵（0.7.0 评审 P4：实现与测试都在 operations.js——createOpsPump）。 */
-const opsPump = createOpsPump(opsStore, () => opsPumpCtx);
-
-/**
- * 设置类操作记录（2026-10-10）：终态直落——不入泵、不排队、不参与恢复重放；
- * 恢复/清除语义天然兼容（done/failed 终态原样保留、TERMINAL_CLEARABLE 可清、failed 点红点）。
- * 与泵 finalize 同源触发 syncOps；面板未挂载时静默（记录本体已落 localStorage）。
- * 口径 = 面板发起的供给面/信任边界设置变更（DESIGN §2.6 修订）；参数进 meta，target 只承载身份。
- */
-function recordSettingsOp(kind, target, status, meta, error) {
-  opsStore.upsert({ kind, target, status, ...(meta ? { meta } : {}), ...(error ? { error } : {}) });
-  if (opsPumpCtx && opsPumpCtx.syncOps) opsPumpCtx.syncOps();
-}
+// ---------- 全局操作记录（0.7.0 Task 13 + 评审 P4；ADR-0023 第二刀：store/pump 持有权迁 panel-ops.js） ----------
+/** 模块级单例语义不变（审计碰撞·洞1），创建与私有持有在 panel-ops.js（ToolCardRow 面板外
+ *  写入事实，ADR-0023 决策 3）；此处显式取用口让 main.jsx 既有引用零改写（标识符不变）。 */
+const opsStore = getSharedOpsStore();
+const opsPump = getSharedOpsPump();
 
 
 const OP_STATUS_CLS = {
@@ -2641,7 +2634,8 @@ function DshmVersionChip({ version, notify, initialCheck, ops }) {
         kind: "ok",
         // 0.10.0 R10：生效语义忠实透传宿主 application——applied/overridden → false（不弹重启横幅）、
         // restart-required → true；响应缺席时保守 true（旧行为兜底）
-        needsRestart: res.needsRestart ?? true,
+        // ADR-0023 第二刀：判定单源（保守默认 ?? true 收进 restartBannerDecision，conservative 见其直测）
+        needsRestart: restartBannerDecision("self-upgrade", res).needsRestart,
         text: lookup("notify.selfupgraded", { from: version, to: res.version || "latest" }) + oc.buildsSuffix(res),
       });
     } catch (e) {
@@ -3125,7 +3119,7 @@ function MarketPanel({ onClose }) {
   const runOp = useCallback(
     (kind, target, exec, meta = {}, reuseId) =>
       // session:true = 活会话标记（终审·新伤1）：重挂载的 restore 跳过（泵仍拥有）；persist 时剥离。
-      // 入队与 waiters/原始错误保真都在 createOpsPump（评审 P4：实现与测试同源）。
+      // 入队与 waiters/原始错误保真都在泵实现（operations.js，评审 P4：实现与测试同源）。
       // 0.9.79（R1-6）：操作终态后连带拉取一次外部记录——他终端（CLI/Agent 工具）的并发变更
       // 尽快可见；拉取失败静默。
       opsPump.enqueue({ ...(reuseId ? { id: reuseId } : {}), kind, target, status: "queued", meta: { ...meta, session: true } }, exec).finally(() => {
@@ -3221,12 +3215,14 @@ function MarketPanel({ onClose }) {
       return { ok: false, error: String((e && e.message) || e), ...(e && e.issue ? { issue: e.issue } : {}) };
     }
   }, []);
+  // ADR-0023 第二刀：泵上下文经显式绑定装配（取代原先的模块级可变单例上下文，见 panel-ops.js 持有者）；
+  // deps 无 refreshViews——全库无消费死字段已删（Q16）。未绑定 = 现行降级语义（operations.js 泵侧判空路径零改动）。
   useEffect(() => {
-    opsPumpCtx = { stillApplies, dispatchRestored, syncOps, refreshViews };
+    bindPanelOps({ stillApplies, dispatchRestored, syncOps });
     return () => {
-      if (opsPumpCtx && opsPumpCtx.syncOps === syncOps) opsPumpCtx = null;
+      unbindPanelOps();
     };
-  }, [stillApplies, dispatchRestored, syncOps, refreshViews]);
+  }, [stillApplies, dispatchRestored, syncOps]);
   // 0.10.3（挂账 1）：中断升级的账实复读缝——返回 target 的实装版本（恢复对账用；读法与 stillApplies 同款实读）
   const installedVersionOf = useCallback(async (r) => {
     try {
@@ -3239,35 +3235,33 @@ function MarketPanel({ onClose }) {
     }
   }, []);
   // 恢复时序（0.7.0 Task 13）：installed resolve → restoreRecords（校验改标）→ 启动**同一个**前台泵
+  // ADR-0023 第二刀（Q10/Q17）：判定在 restoreRecords（纯）、副作用编排经 planReconcileActions 出计划；
+  // 适配器只执行——逐条落账序与 0.10.7 现行崩溃窗口语义逐字节一致。
   const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current || !installed.data) return;
     restoredRef.current = true;
     void (async () => {
       const restored = await restoreRecords(opsStore.list(), stillApplies, installedVersionOf);
+      // 0.10.7（Q1-b/Q2-a）：已读集合存独立 localStorage 键（记录生命周期外），键 = id|target|toVersion 元组
+      const reconcileStorage = typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+      const seen = readReconcileNotified(reconcileStorage);
+      const plan = planReconcileActions(restored, seen);
       // 0.10.7（A 方案·主人裁决）：先落账后补报——persist 抛错则静默放弃该次提醒（丢失一次 < 重复轰炸），
       // 并留诊断（Q5-a：真机「每开必弹」的复活机制未定谳，此行是它的第一手踪迹）
       try {
-        opsStore.replaceAll(restored);
+        opsStore.replaceAll(plan.replacements);
       } catch (err) {
         console.error("[dsh-m] restore persist failed:", err);
         return;
       }
-      // 0.10.7（Q1-b/Q2-a）：对账补横幅一次性化——已读集合存独立 localStorage 键（记录生命周期外），
-      // 键 = id|target|toVersion 元组；命中即跳过（同一条升级只提醒一次，新升级照常提醒）
-      const reconcileStorage = typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
-      const seen = readReconcileNotified(reconcileStorage);
-      for (const r of restored) {
-        if (r.status === "done" && r.meta && r.meta.reconciledAfterRestart) {
-          const key = `${r.id}|${r.target}|${r.meta.toVersion}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          writeReconcileNotified(reconcileStorage, seen);
-          notify({ kind: "ok", text: lookup("upgrade.reconciled.done", { pkg: r.target, to: `v${r.meta.toVersion}` }) });
-        }
+      for (const n of plan.notifications) {
+        seen.add(n.dedupeKey);
+        writeReconcileNotified(reconcileStorage, seen);
+        notify({ kind: "ok", text: lookup(n.i18nKey, n.params) });
       }
       syncOps();
-      if (restored.some((r) => r.status === "queued")) {
+      if (plan.shouldKick) {
         void opsPump.kick(); // 洞3：恢复并入前台泵（单一执行路径；drainRestored 循环退役）
       }
     })();

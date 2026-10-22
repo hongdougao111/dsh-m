@@ -165,7 +165,9 @@ describe('0.10.2 静默自升级（结构序钉；0.10.1 确认框按主人体�
   })
 
   it('③ needsRestart 忠实透传响应值（R10）：res.needsRestart ?? true——applied→false 不弹重启横幅', () => {
-    assert.ok(src.includes('needsRestart: res.needsRestart ?? true'), '透传锚（旧 needsRestart: true 已退役）')
+    // ADR-0023 第二刀：判定单源迁 panel-ops.js（保守默认 ?? true 收进 restartBannerDecision，直测见 client-panel-ops）
+    const po = readFileSync(new URL('../src/client/panel-ops.js', import.meta.url), 'utf8')
+    assert.ok(po.includes('r.needsRestart ?? true'), '透传锚（旧 needsRestart: true 已退役）')
     // 评审 R1-3：负向锚用单行切片锚（含 \n 的多行锚在 CRLF 工作树恒真、回归保护失效）
     const start = src.indexOf('const performUpgrade = async () => {')
     const end = src.indexOf('const state = deriveChipState(check, version);')
