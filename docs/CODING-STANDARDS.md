@@ -21,7 +21,8 @@
 ## 客户端状态机约定
 
 - 面板手势类逻辑（拖拽/resize/后续同类）一律拆 **DOM-free 纯逻辑模块**（`src/client/window-*.js`，ESM 具名导出，禁 `module.exports`）+ node:test 直测（契约锚 + 数学矩阵 + 存取语义三件套）。
-- DOM 接线层（main.jsx 手势状态机）不写 node 单测，以 bundle/源锚 + 渲染冒烟覆盖；纪律逐条镜像既有先例（ADR-0017/0021：rAF 帧内写、手势帧零 setState、释放收口、setPointerCapture、主键门卫、多指守卫、卸载清理）。
+- 面板接线逻辑（泵上下文装配、恢复对账编排、横幅判定）同上拆 DOM-free 模块（先例 `src/client/panel-ops.js`，ADR-0023）：判定/编排以纯函数导出直测，副作用（setState/notify/落盘）留在组件内的薄 effect 适配器。
+- DOM/React 接线层不写行为级 node 单测、不引入 jsdom：组件文件具名导出、可被测试直接 require，首渲染由渲染冒烟（SSR renderToString）覆盖；bundle/源锚仅覆盖无缝可走的物理事实（ADR-0023 三桶政策：「有缝即接口测试，源锚只留给无缝可走的物理事实」）。手势纪律逐条镜像既有先例（ADR-0017/0021：rAF 帧内写、手势帧零 setState、释放收口、setPointerCapture、主键门卫、多指守卫、卸载清理）。
 - resize 拖拽路径**零动画**：不给 width/height/grid/flex-wrap 挂任何 transition（跟手 1:1 优先于装饰）。
 
 ## 行为零变化承诺（每特性必填格）
