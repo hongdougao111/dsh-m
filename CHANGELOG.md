@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.10 修复：侧栏双语标签注册静默失效（locale.register 引用出仓后未定义）
+
+- **症状**：0.10.9 起，侧栏 dsh-m 入口的 locale 字典注册静默失败——`main.jsx` 内 `locale.register("dshm", { zh: ZH, en: EN })` 在 i18n 词典出仓（ADR-0023 第一刀 T1）后引用未声明标识符，`try/catch` 吞掉 ReferenceError；中文界面无感，英文界面侧栏标签回退默认文案。
+- **捕获路径**：0.10.9 retro 落地的客户端自由变量守卫（`scripts/check-client-imports.mjs`，TS AST 标识符闭包扫描，进 `npm test` 链首并随 registry CI 生效）首跑即命中——该雷 SSR/测试/CI/真机狗粮四道门均不可达，恰是「首渲染天花板」盲区的实证。
+- **修复**：require 解构补回 `ZH, EN`（`i18n.js` 本就具名导出）；同批落地 retro C1-C5：自由变量守卫进测试链、check-release 计数新鲜度门（顶条「全量 N/N」对实测断言）、永真判据防呆与搬移脚本不变量入 CODING-STANDARDS。
+- **验证**：全量 1671/1671 绿；守卫红绿双向实证（注入假变量 exit 1 点名、还原绿）；check-release 计数步主张=实测。
+
 ### 0.10.9 重构：客户端壳层组件缝三刀战役（ADR-0023）——main.jsx 4475→1163 行，零行为变化
 
 - **需求（2026-10-22 架构评审钢人裁决 + 2026-10-23 grill 共识 19 项、独立评审 16 题）**：main.jsx 单文件巨石（4475 行、近月 113 次触碰）的测试面是「grep 源文本」（18 个测试文件读源码、11+ 源码断言 describe），对账横幅单一主题四轮修复每轮同改 3-5 区——「接口=源文本」是浅接口的制度化代价。
@@ -725,6 +732,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fix in 0.10.10 — sidebar bilingual label registration silently dead (locale.register references undefined identifiers after dictionary extraction)
+
+- **Symptom**: since 0.10.9, the locale dictionary registration for the sidebar dsh-m entry silently fails — `locale.register("dshm", { zh: ZH, en: EN })` in `main.jsx` references undeclared identifiers after the i18n dictionary moved out (ADR-0023 knife 1, T1), and a `try/catch` swallows the ReferenceError; the Chinese UI shows nothing wrong, while the English UI falls back to default sidebar labels.
+- **Caught by**: the client free-variable guard shipped in the 0.10.9 retro (`scripts/check-client-imports.mjs`, TS-AST identifier closure scan, wired into the `npm test` chain and inherited by registry CI) — first run hit it. The landmine was unreachable through SSR, tests, CI, and on-machine dogfood alike: a live demonstration of the "first-render ceiling" blind spot.
+- **Fix**: destructure `ZH, EN` back from the require (`i18n.js` already exports them); the same batch lands retro C1-C5: the free-variable guard in the test chain, a CHANGELOG count-freshness step in check-release (top entry's claimed count asserted against a live run), and "vacuous-criterion" + "move-script invariant" lines in CODING-STANDARDS.
+- **Verification**: full suite 1671/1671 green; guard red-green verified both ways (injected fake variable → exit 1 with the offender named, revert → green); check-release count step claim = measured.
 
 ### Refactor in 0.10.9 — client shell component-seam campaign (ADR-0023): main.jsx 4475→1163 lines, zero behavior change
 
