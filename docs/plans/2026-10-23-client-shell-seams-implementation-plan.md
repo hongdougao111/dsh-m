@@ -451,7 +451,7 @@
 | client-scroll-contain.test.mjs:40-47 | `.dshm-ops-scroll` 双规则对+banner-text 条件规则 | ① | 改读 styles.js |
 | client-scroll-contain.test.mjs:51-59 | `function useScrollableContain(dep)` 定义/ResizeObserver 守卫/可滚判定 | ② | useScrollableContain 主要消费方 OperationsCard/RestartBanner——落位后改读落位文件（hooks.js 或 chrome.jsx，以 T10 实际落位为准） |
 | client-scroll-contain.test.mjs:64-74 | 操作记录滚动区三锚（OperationsCard :3221-3276） | ② | 改读 operations-card.jsx |
-| client-scroll-contain.test.mjs:76-78 | RestartBanner `` className: `dsvm-banner-text${textScrollCls}` ``（:1088-1092） | ② | 【已裁决】RestartBanner 在 chrome.jsx 成员清单内 → 改读 chrome.jsx |
+| client-scroll-contain.test.mjs:76-78 | RestartBanner `` className: `dshm-banner-text${textScrollCls}` ``（:1088-1092；普查原文误书 dsvm-，评审 O-2 勘误） | ② | 【已裁决】RestartBanner 在 chrome.jsx 成员清单内 → 改读 chrome.jsx |
 | client-scroll-contain.test.mjs:80-86 | toast 两锚（:4025 MarketPanel 保留区） | ③ | 保留，锚对象 main.jsx 不变 |
 | client-operations-view.test.mjs:159 | `require("./operations-view.js")` | ② | 改读 operations-card.jsx |
 | client-operations-view.test.mjs:160-162 | groupOpsByDay/opRowVm/opUpgradeMeta 消费 | ② | 改读 operations-card.jsx |
