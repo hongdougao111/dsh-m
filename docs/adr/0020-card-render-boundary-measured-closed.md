@@ -33,3 +33,7 @@
 - **复测方法**：`node scripts/probe-render-count.mjs`（手动运行不进 CI，verify-panel-mobile 同款惯例；产物 `node_modules/.dshm/render-probe/results.json`；插桩锚点漂移会显式报错而非静默测错）。
 - **测量诚实性边界**：本机为服务器级 x86（headless Chromium），慢机器按比例放大——最大场景 37ms 对 65ms 感知线余量约 1.8×；dev UMD 参考数字约 2×（88–130ms），仅作最坏上界。
 - **发布形态**：随 0.9.87+ 顺带入库（探针 + 本 ADR 均为开发工具/文档，无运行时行为变化）。
+
+## 增补（2026-10-23，实施产出评审 S-1）：重开条件③改相对增量判据
+
+0.10.9 战役评审（R6 三组对照）实证：longtask 出现与否对**机器态敏感**——同一台机上，执行时点全场景零 longtask，复核日连**基线 cb0f295** 的 S1 boot 段都复现单发 ~52–56ms longtask。原绝对判据「出现 longtask ≥ 1」会把环境漂移误报为回归。**③ 自本增补起改为**：探针复测任一常规场景 > 65ms，或出现**相对同日同机基线复跑的增量 longtask**（同日先跑基线取数、再跑 HEAD 对照；结构计数 cards/icons/tabs/commits 不一致无论 ms 数字如何均即重开）。增补理由与三组对照数据存档于 0.10.9 CHANGELOG 验证段与评审台账（.dsh-research/impl-review-scratch/ledger.md R6）。
