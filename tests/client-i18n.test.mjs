@@ -17,6 +17,17 @@ const dictKeys = new Set([...Object.keys(ZH), ...Object.keys(EN)])
 const auditTargets = [
   { file: '../src/client/main.jsx' },
   { file: '../src/client/op-outcome.js' },
+  // ADR-0023 T11：调用侧审计扩面至全部出仓组件（lookup 直接量的完整缺陷面）
+  { file: '../src/client/chrome.jsx' },
+  { file: '../src/client/card.jsx' },
+  { file: '../src/client/favorite-zone.jsx' },
+  { file: '../src/client/zone-chips.jsx' },
+  { file: '../src/client/operations-card.jsx' },
+  { file: '../src/client/version-chip.jsx' },
+  { file: '../src/client/detail-modal.jsx' },
+  { file: '../src/client/installed-tab.jsx' },
+  { file: '../src/client/market-tab.jsx' },
+  { file: '../src/client/settings-tab.jsx' },
 ]
 
 for (const { file } of auditTargets) {

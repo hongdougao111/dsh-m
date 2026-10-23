@@ -155,20 +155,21 @@ describe('opRowVm：方向/来源/版本/耗时派生与优雅回退', () => {
 
 describe('main.jsx 操作记录增强接线结构锚', () => {
   const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
-  // ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）
+  // ADR-0023 第一刀：词典面断言改读 i18n.js；T10：操作卡接线/类名锚改读 operations-card.jsx
   const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
+  const ocSrc = readFileSync(join(root, 'src/client/operations-card.jsx'), 'utf8')
   it('消费 operations-view 视图模型', () => {
-    assert.ok(src.includes('require("./operations-view.js")'), '必须 require ./operations-view.js')
-    assert.ok(src.includes('groupOpsByDay(finished)'), '已结束区必须按日分组')
-    assert.ok(src.includes('opRowVm(r)'), '行渲染必须走 opRowVm')
-    assert.ok(src.includes('opUpgradeMeta(r)'), '升级调用点必须管道 opUpgradeMeta')
+    assert.ok(ocSrc.includes('from "./operations-view.js"'), '必须消费 operations-view 视图模型（ESM import，operations-card.jsx）')
+    assert.ok(ocSrc.includes('groupOpsByDay(finished)'), '已结束区必须按日分组')
+    assert.ok(ocSrc.includes('opRowVm(r)'), '行渲染必须走 opRowVm')
+    assert.ok((readFileSync(join(root, 'src/client/market-tab.jsx'), 'utf8') + readFileSync(join(root, 'src/client/installed-tab.jsx'), 'utf8')).includes('opUpgradeMeta(r)'), '升级调用点必须管道 opUpgradeMeta（站点随 Tab 出仓——ADR-0023 T11 双文件合计）')
   })
   it('新展示元素与新 i18n 键在位', () => {
-    assert.ok(src.includes('dsvm-optime'), '行内时刻列')
-    assert.ok(src.includes('dsvm-opday'), '按日分组头')
-    assert.ok(src.includes('dsvm-opdir'), '开关方向徽章')
-    assert.ok(src.includes('dsvm-opver'), '升级版本串')
-    assert.ok(src.includes('dsvm-opdur'), '耗时列')
+    assert.ok(ocSrc.includes('dsvm-optime'), '行内时刻列（operations-card.jsx）')
+    assert.ok(ocSrc.includes('dsvm-opday'), '按日分组头（operations-card.jsx）')
+    assert.ok(ocSrc.includes('dsvm-opdir'), '开关方向徽章（operations-card.jsx）')
+    assert.ok(ocSrc.includes('dsvm-opver'), '升级版本串（operations-card.jsx）')
+    assert.ok(ocSrc.includes('dsvm-opdur'), '耗时列（operations-card.jsx）')
     assert.ok(i18nSrc.includes('"op.day.today"'), '今天组头键（i18n.js）')
     assert.ok(i18nSrc.includes('"op.day.yesterday"'), '昨天组头键（i18n.js）')
     assert.ok(i18nSrc.includes('settings.ops.group.done.n'), '已结束计数键（i18n.js）')
@@ -244,11 +245,12 @@ describe('外部记录 × 视图模型（渠道徽标/单条移除出口/按日�
 
 describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
   const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
-  // ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）
+  // ADR-0023 第一刀：词典面断言改读 i18n.js（调用面仍读 main.jsx）；T10：操作卡锚改读 operations-card.jsx
   const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
+  const ocSrc = readFileSync(join(root, 'src/client/operations-card.jsx'), 'utf8')
   it('⑤渠道徽标渲染 + i18n 键在位', () => {
-    assert.ok(src.includes('dsvm-opchan'), '渠道徽标类名')
-    assert.ok(src.includes('channelLabelKey('), '徽标文案必须走 channelLabelKey')
+    assert.ok(ocSrc.includes('dsvm-opchan'), '渠道徽标类名（operations-card.jsx）')
+    assert.ok(ocSrc.includes('channelLabelKey('), '徽标文案必须走 channelLabelKey（operations-card.jsx）')
     assert.ok(i18nSrc.includes('"op.channel.host-tool": "Agent 工具"'), 'ZH 键：Agent 工具（Q2b，i18n.js）')
     assert.ok(i18nSrc.includes('"op.channel.cli": "命令行"'), 'ZH 键：命令行（Q2b，i18n.js）')
     assert.ok(i18nSrc.includes('"op.channel.external": "外部"'), 'ZH 键：兜底外部（R1-4，i18n.js）')
@@ -259,14 +261,14 @@ describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
     assert.ok(i18nSrc.includes('"op.kind.desktop-toggle"'), '新 kind：desktop-toggle（i18n.js）')
   })
   it('⑥单条 ✕ 出口改走 canRemoveRow（内联判定退役）', () => {
-    assert.ok(src.includes('canRemoveRow(r)'), '行渲染必须消费 canRemoveRow')
-    assert.equal(src.includes('r.status === "input" || r.status === "failed" || r.status === "superseded"'), false, 'main.jsx 内联可移除判定退役（R3-1 下沉 operations-view）')
+    assert.ok(ocSrc.includes('canRemoveRow(r)'), '行渲染必须消费 canRemoveRow（operations-card.jsx）')
+    assert.equal(ocSrc.includes('r.status === "input" || r.status === "failed" || r.status === "superseded"') || src.includes('r.status === "input" || r.status === "failed" || r.status === "superseded"'), false, '消费面内联可移除判定退役（operations-card.jsx + main.jsx 双扫，R3-1 下沉 operations-view）')
   })
   it('⑦外部 failed 行单条 ✕ 接线锚（0.9.82 修订 R2-3）', () => {
-    assert.ok(src.includes('api("external-operations-remove"'), '服务端 per-id 删除 method 调用')
-    assert.ok(src.includes('removeExternal('), 'overlay 按 id 剔除（墓碑拦在途 fetch 复活）')
+    assert.ok(src.includes('api("external-operations-remove"'), '服务端 per-id 删除 method 调用（MarketPanel，main.jsx 保留区）')
+    assert.ok(src.includes('removeExternal('), 'overlay 按 id 剔除（墓碑拦在途 fetch 复活；main.jsx 保留区）')
     assert.ok(i18nSrc.includes('"op.remove.failed"'), '失败 toast i18n 键（{err} 插值，i18n.js）')
-    assert.ok(src.includes('onRemove(r)'), '行渲染传整行 record（onOpsRemove 按 channel 分流）')
+    assert.ok(ocSrc.includes('onRemove(r)'), '行渲染传整行 record（onOpsRemove 按 channel 分流；operations-card.jsx）')
     const view = readFileSync(join(root, 'src/client/operations-view.js'), 'utf8')
     assert.ok(view.includes("return r.status === 'failed'"), 'canRemoveRow 外部 failed 放行')
   })
@@ -280,9 +282,9 @@ describe('main.jsx × 外部记录接线结构锚（Task 5）', () => {
     assert.ok(src.includes('fetchExternalOps'), '具名 fetch 函数')
   })
   it('⑦已结束计数 = 合并后总数（R1-7）：渲染截断 slice(-50) 照旧、计数用全量', () => {
-    assert.ok(src.includes('finishedAll'), '全量终态列表变量在位')
+    assert.ok(ocSrc.includes('finishedAll'), '全量终态列表变量在位（operations-card.jsx）')
     assert.ok(i18nSrc.includes('settings.ops.group.done.n'), '计数键沿用（i18n.js）')
-    assert.ok(/group\.done\.n.*finishedAll\.length/s.test(src), '计数实参 = finishedAll.length')
+    assert.ok(/group\.done\.n.*finishedAll\.length/s.test(ocSrc), '计数实参 = finishedAll.length（operations-card.jsx）')
   })
   it('外部记录 overlay 不写 localStorage（R1-3 结构锚）', () => {
     const modelSrc = readFileSync(join(root, 'src/client/operations.js'), 'utf8')

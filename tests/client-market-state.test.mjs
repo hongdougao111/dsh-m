@@ -301,18 +301,19 @@ describe('marketResponseEquivalent（C3 零增量提交守卫：JSON 值语义�
   })
 })
 
-// ---------- C3 接线结构锚（main.jsx 源串；client-lightbox 同款惯例） ----------
+// ---------- C3 接线结构锚（收藏批量 stale 随 FavoriteZone 迁 favorite-zone.jsx——ADR-0023 T10；fetchPage 守卫已随 T9 迁 hooks.js） ----------
 describe('C3 接线结构锚（收藏批量 stale + fetchPage 零增量守卫）', () => {
-  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+  const favSrc = readFileSync(new URL('../src/client/favorite-zone.jsx', import.meta.url), 'utf8')
 
   it('stale 检查批量化（0.9.87 FP2）：单次 market-ids-exist，失败保守全 stale', () => {
-    assert.ok(src.includes('api("market-ids-exist", { ids: list.map((f) => f.id) })'), '收藏 stale 检查必须单发批量 market-ids-exist（取代逐收藏 market 扇出）')
+    assert.ok(favSrc.includes('api("market-ids-exist", { ids: list.map((f) => f.id) })'), '收藏 stale 检查必须单发批量 market-ids-exist（取代逐收藏 market 扇出）')
     // 0.10.7：多行锚改单行锚（CRLF 工作树上含 \n 的锚恒真，028 §4 第 3 项）——catch 臂清空句全仓恰一处
-    assert.equal(src.split('present = new Set();').length - 1, 2, 'API 失败 → 空 Set = 全部保守 stale（let 初始化 + catch 清空恰两处）')
-    assert.ok(!src.includes('api("market", { query: fav.id'), '不得回退逐收藏 market 扇出')
+    assert.equal(favSrc.split('present = new Set();').length - 1, 2, 'API 失败 → 空 Set = 全部保守 stale（let 初始化 + catch 清空恰两处）')
+    assert.ok(!favSrc.includes('api("market", { query: fav.id'), '不得回退逐收藏 market 扇出')
   })
-  it('fetchPage 零增量守卫：内容等价不提交，loading 照常收口', () => {
-    assert.ok(src.includes('if (!marketResponseEquivalent(prevData, merged)) setData(merged);'), '守卫调用逐字锚')
-    assert.ok(src.includes('autoExpandDecision, marketResponseEquivalent } = require("./market-state.js")'), 'market-state require 行导入 marketResponseEquivalent')
+  it('fetchPage 零增量守卫：内容等价不提交，loading 照常收口（ADR-0023 T9：useMarketData 迁 hooks.js，锚随迁）', () => {
+    const hooksSrc = readFileSync(new URL('../src/client/hooks.js', import.meta.url), 'utf8')
+    assert.ok(hooksSrc.includes('if (!marketResponseEquivalent(prevData, merged)) setData(merged);'), '守卫调用逐字锚')
+    assert.ok(hooksSrc.includes('import { normalizeMarketQuery, createZoneState, normalizeMarketResponse, searchSourceOf, resetPageOnFilterChange, mergeLatestFields, marketResponseEquivalent } from "./market-state.js"'), 'hooks.js import 行导入 marketResponseEquivalent')
   })
 })

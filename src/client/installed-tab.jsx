@@ -1,0 +1,257 @@
+/**
+ * ADR-0023 第三刀 T11 组件出仓·批次二（installed-tab.jsx）：自 main.jsx verbatim 迁移，函数体零重写。
+ * 成员：DetailRows, InstalledTab
+ */
+import React from "react";
+const h = React.createElement;
+const { useState } = React;
+import { api } from "./hooks.js";
+import { lookup } from "./i18n.js";
+import { installedViewModel } from "./installed-view.js";
+import { toggleViewModel, toggleNoticeKeys } from "./toggle-view.js";
+import { applyInstalledUpdates } from "./installed-updates.js";
+import { opUpgradeMeta } from "./operations-view.js";
+import { restartBannerDecision } from "./panel-ops.js";
+import { Icon, Spin, PhaseDot, ToggleSwitch, TwoStepButton, LinksRow, ProgressLine, ReadmeBlock } from "./chrome.jsx";
+import { Card } from "./card.jsx";
+
+import { createOpOutcome } from "./op-outcome.js";
+// op-outcome 模块级实例（与 main.jsx 同款装配）
+const oc = createOpOutcome(lookup);
+
+function InstalledTab({ notify, installed, updates, onMutation, ops }) {
+  const { loading, data, error, reload } = installed;
+  const updateRows = updates && updates.data && Array.isArray(updates.data.updates) ? updates.data.updates : [];
+  const [openPkg, setOpenPkg] = useState(null);
+  const [readmePkg, setReadmePkg] = useState(null);
+  // 乐观开关（2026-10-13 UX 修复）：点击瞬间本地记录 {pkg → enabled}，开关立即翻转；
+  // set-enabled 返回并重取已装数据后在 finally 清除（服务端态已收敛，无闪烁）；
+  // 失败路径同样在 finally 清除＝回滚到服务端态，配合 err toast。PhaseDot/副行文案一并跟随。
+  const [pendingToggles, setPendingToggles] = useState({});
+  // busy 派生自操作记录（0.7.0 Task 13）——首个进行中的非 install 操作
+  const activeMutateTarget = (ops.records.find((r) => r.kind !== "install" && (r.status === "running" || r.status === "queued" || r.status === "input")) || {}).target || null;
+  // 进度条只服务有 pnpm 阶段的操作（install/upgrade/self-upgrade）。toggle/uninstall 挂它只会
+  // 显示无信息量的「· 准备中」，还要付出 47px×2 的卡片栅格位移——开关原地丢失命中 0.6–1.3s
+  // （2026-10-13 CDP 实测，01_docs/research/2026-10-13-dshm-toggle-ux-cdp-probe.md）。
+  // 注意别合并进 activeMutateTarget：后者还负责逐行禁用按钮（含 toggle 自身）。
+  const progressTarget = (ops.records.find((r) => (r.kind === "install" || r.kind === "upgrade" || r.kind === "self-upgrade") && (r.status === "running" || r.status === "queued" || r.status === "input")) || {}).target || null;
+
+  const doToggle = async (it, enabled) => {
+    setPendingToggles((m) => ({ ...m, [it.pkg]: enabled }));
+    const call = () => api("set-enabled", { pkg: it.pkg, enabled });
+    try {
+      let res;
+      try {
+        res = await ops.runOp("toggle", it.pkg, call, { on: enabled });
+      } catch (first) {
+        if (first && first.opSuperseded) throw first;
+        // hmr 重组窗口可能瞬断传输（set-enabled 幂等，重试一次安全）；复用原记录（审计 #12）
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await ops.runOp("toggle", it.pkg, call, { on: enabled }, first && first.opId);
+      }
+      const note = toggleNoticeKeys(res);
+      const extra = (res.warnings && res.warnings.length ? `（${res.warnings.join("；")}）` : "");
+      // ADR-0023 第二刀：needsRestart 判定单源（委派 toggleNoticeKeys：live→false/restart→true）；文案仍走 note.textKey
+      notify({ kind: "ok", needsRestart: restartBannerDecision("toggle", res).needsRestart, text: lookup(note.textKey, note.params) + extra });
+      // toggle 只重取已装视图：开关不改变 installed-ness 与版本，市场×2/updates 无需跟随
+      // （原 refreshViews 五连请求 → 1 个；渲染churn 同步下降，不稳定窗口缩短）
+      await reload();
+    } catch (e) {
+      // 0.9.94 变更结局描述（op-outcome）：toggle 无守卫路径，guard 分支自然不触发
+      const m = oc.mutationFailed(e, { verb: "toggle", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
+    } finally {
+      // 成功＝服务端数据已收敛后摘除乐观覆盖；失败＝直接回滚到服务端态
+      setPendingToggles((m) => {
+        if (!(it.pkg in m)) return m;
+        const { [it.pkg]: _drop, ...rest } = m;
+        return rest;
+      });
+    }
+  };
+
+  const doUninstall = async (it) => {
+    try {
+      const res = await ops.runOp("uninstall", it.pkg, () => api("uninstall", { pkg: it.pkg }));
+      notify({
+        kind: "ok",
+        // ADR-0023 第二刀：横幅判定单源（uninstall 字面 true）
+        needsRestart: restartBannerDecision("uninstall").needsRestart,
+        text: lookup("notify.uninstalled", { pkg: res.pkg }) +
+          (res.liveDisabled ? lookup("notify.livedisabled") : "") +
+          (res.leftovers && res.leftovers.length ? lookup("notify.leftovers", { paths: res.leftovers.join(", ") }) : ""),
+      });
+      await (onMutation ? onMutation() : reload());
+    } catch (e) {
+      // 0.9.94 变更结局描述（op-outcome）
+      const m = oc.mutationFailed(e, { verb: "uninstall", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
+    }
+  };
+
+  const doUpgrade = async (it) => {
+    try {
+      // 0.9.75：升级结果版本变迁（from/to，github 源回退 sha 前 7 位）经 opMeta 落账进操作记录
+      // 0.10.3（挂账 1 数据面）：toVersion 随 enqueue 落 meta（中断恢复对账的比对依据）
+      const res = await ops.runOp("upgrade", it.pkg, async () => {
+        const r = await api("upgrade", { pkg: it.pkg });
+        const m = opUpgradeMeta(r);
+        return m ? { ...r, opMeta: m } : r;
+      }, { toVersion: it.latestVersion });
+      // 0.10.0 R4：降级恢复结局（升级失败但已自动回装旧版）→ warn 投影，绝不进成功臂（与回滚事实相反）
+      const degraded = oc.degradedOutcome(res);
+      if (degraded) {
+        notify({ kind: "warn", text: degraded.text });
+      } else {
+        // 0.9.94：升级成功文案（含 0.9.22 生效判定三态分流，缺席 = github 源等未判定，维持现状横幅）单源 op-outcome
+        // ADR-0023 第二刀：needsRestart 判定单源 restartBannerDecision（委派 upgradeNotify 三态）；文案仍单源 op-outcome
+        const ok = oc.upgradeOkText(res);
+        notify({ kind: "ok", needsRestart: restartBannerDecision("upgrade", res).needsRestart, text: ok.text });
+      }
+      await (onMutation ? onMutation() : reload());
+    } catch (e) {
+      // 0.9.94 变更结局描述（op-outcome）：guard/superseded/plain 合一（今日 guard 在前，互斥分支语义等价）
+      const m = oc.mutationFailed(e, { verb: "upgrade", target: it.pkg });
+      notify({ kind: m.kind, text: m.text });
+    }
+  };
+
+  if (loading && !data) return h("div", { className: "dshm-empty" }, lookup("installed.loading"), Spin());
+  if (error) return h("div", { className: "dshm-err" }, lookup("failed.read", { err: error }));
+  // 两段加载（ADR-0008）：items 指向 merged 视图；updates 未到时即第一段原样（卡片暂无更新提示，常态安静）
+  const items = applyInstalledUpdates((data && data.items) || [], updateRows);
+  if (!items.length) return h("div", { className: "dshm-empty" }, `${lookup("installed.empty")} (${data.profileDir})`);
+
+  return h(
+    React.Fragment,
+    null,
+    h("div", { className: "dshm-hint" }, lookup("profile.hint", { path: data.profileDir })),
+    data.others > 0
+      ? h("div", { className: "dshm-others" }, lookup("installed.others", { n: data.others }))
+      : null,
+    items.some((x) => x && x.outdated)
+      ? h(
+          "div",
+          { className: "dsvm-sortrow" },
+          h(
+            "button",
+            {
+              className: "dshm-btn primary sm",
+              disabled: activeMutateTarget != null,
+              onClick: () => {
+                // 全部入队（0.7.0 Task 15）：逐条 runOp 记录，后端 Profile 变更事务 FIFO 保证串行
+                for (const it of items.filter((x) => x && x.outdated)) void doUpgrade(it);
+              },
+            },
+            lookup("installed.upgradeAll", { n: items.filter((x) => x && x.outdated).length }),
+          ),
+        )
+      : null,
+    progressTarget ? h(ProgressLine, { key: "prog" }) : null,
+    h(
+      "div",
+      { className: "dshm-cards" },
+      items.map((it) => {
+        const vm = installedViewModel(it);
+        const pendingOn = pendingToggles[it.pkg];
+        const tvm0 = toggleViewModel(it);
+        // 乐观翻转覆盖开关视觉；停用时相位点按不变量清空（enabled===false → 相位 null）
+        const tvm = pendingOn === undefined
+          ? tvm0
+          : { ...tvm0, switchOn: pendingOn, ...(pendingOn === false ? { phaseDotClass: "", phaseLabelKey: null } : {}) };
+        return Card({
+          key: it.pkg,
+          icon: h(Icon, { entry: { name: it.name, github: vm.githubRepo, icon: null } }),
+          name: it.name,
+          topRight: h(ToggleSwitch, {
+            vm: tvm,
+            disabled: activeMutateTarget === it.pkg,
+            onChange: (enabled) => doToggle(it, enabled),
+          }),
+          badges: [
+            it.outdated ? h("span", { className: "dshm-badge warn", key: "u" }, `⬆ ${vm.latestLabel}`.trim()) : null,
+            it.community === true
+              ? h("span", { className: "dshm-badge info", key: "r" }, lookup("badge.community"))
+              : it.registryId
+                ? h("span", { className: "dshm-badge", key: "r" }, lookup("badge.market"))
+                : h("span", { className: "dshm-badge info", key: "r" }, lookup("badge.nonmarket")),
+          ],
+          desc: it.description || "（无描述）",
+          sub: [
+            h(PhaseDot, { key: "dot", vm: tvm }),
+            pendingOn === undefined
+              ? (vm.phaseKey ? lookup(vm.phaseKey) : lookup(vm.enabledLabelKey))
+              : lookup(pendingOn ? "toggle.state.on" : "toggle.state.off"),
+            `v${it.version || "?"}`,
+            vm.sourceLabelKey ? lookup(vm.sourceLabelKey) : it.source,
+            vm.latestIssue ? lookup("installed.check.incomplete") : null,
+          ]
+            .filter(Boolean)
+            .map((part, i) => (i === 0 ? part : [" · ", part]))
+            .flat(),
+          links: h(LinksRow, {
+            npm: it.source === "npm" ? it.pkg : null,
+            github: vm.githubRepo,
+          }),
+          open: openPkg === it.pkg,
+          onToggle: () => setOpenPkg(openPkg === it.pkg ? null : it.pkg),
+          detail: readmePkg === it.pkg
+            ? h(ReadmeBlock, { pkg: it.pkg, repo: vm.githubRepo }) // 0.9.49：已装行走视图模型三级兜底（registryGithub/package.json repository/spec 解析），此前误传不存在的 it.github 导致相对链接全归 #
+            : DetailRows([
+                [lookup("detail.pkg"), it.pkg],
+                [lookup("detail.spec"), it.spec],
+                [lookup("detail.latest"), vm.latestLabelDetail],
+                [lookup("detail.listed"), it.registryId || lookup("detail.listed.no")],
+                [lookup("detail.path"), it.path],
+                vm.latestIssue ? [lookup("installed.check.incomplete"), vm.latestIssue.note] : null,
+                vm.guard.warnKey ? [lookup("detail.note"), lookup(vm.guard.warnKey, vm.guard.warnParams)] : null,
+              ]),
+          actions: [
+            h("button", {
+              key: "rd",
+              className: "dshm-btn sm",
+              onClick: (e) => {
+                e.stopPropagation();
+                setReadmePkg(readmePkg === it.pkg ? null : it.pkg);
+              },
+            }, readmePkg === it.pkg ? lookup("readme.hide") : lookup("readme.show")),
+            it.outdated
+              ? h("button", {
+                  key: "up",
+                  className: "dshm-btn primary sm",
+                  disabled: activeMutateTarget === it.pkg,
+                  onClick: (e) => {
+                    e.stopPropagation();
+                    doUpgrade(it);
+                  },
+                },
+                activeMutateTarget === it.pkg ? h(Spin) : lookup("action.upgrade"))
+              : null,
+            h(TwoStepButton, {
+              key: "un",
+              label: lookup("action.uninstall"),
+              confirmLabel: lookup(vm.guard.confirmKey),
+              className: "dshm-btn sm",
+              disabled: activeMutateTarget === it.pkg,
+              onConfirm: () => doUninstall(it),
+            }),
+          ],
+        });
+      }),
+    ),
+  );
+}
+
+function DetailRows(rows) {
+  const list = rows.filter(Boolean);
+  return h(
+    "div",
+    { className: "dshm-kv" },
+    list.flatMap(([k, v]) => [
+      h("span", { className: "k", key: `${k}-k` }, k),
+      h("span", { key: `${k}-v`, style: { wordBreak: "break-all" } }, v),
+    ]),
+  );
+}
+
+export { DetailRows, InstalledTab };

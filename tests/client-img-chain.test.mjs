@@ -24,9 +24,13 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const mainSrc = readFileSync(join(here, '../src/client/main.jsx'), 'utf8')
-// ADR-0023 第一刀：词典面断言改读 i18n.js；CSS 面（含切片）改读 styles.js
+// ADR-0023 第一刀：词典面断言改读 i18n.js；CSS 面（含切片）改读 styles.js；T10：Shot/useImgChain/Lightbox 面改读 chrome.jsx
 const i18nSrc = readFileSync(join(here, '../src/client/i18n.js'), 'utf8')
 const stylesSrc = readFileSync(join(here, '../src/client/styles.js'), 'utf8')
+const chromeSrc = readFileSync(join(here, '../src/client/chrome.jsx'), 'utf8')
+const detailModalSrc = readFileSync(join(here, '../src/client/detail-modal.jsx'), 'utf8')
+const marketTabSrc = readFileSync(join(here, '../src/client/market-tab.jsx'), 'utf8')
+const cardSrc = readFileSync(join(here, '../src/client/card.jsx'), 'utf8')
 
 const RAW_URL = 'https://raw.githubusercontent.com/elysia395/dsh-wallpaper-engine/HEAD/docs/images/main-interface.gif'
 
@@ -128,34 +132,34 @@ describe('赢家记忆（Q8：页面生命周期、最近成功层、成功才�
   })
 })
 
-describe('main.jsx 计时门控源锚（评审 R1-1/R1-4：settled 解除 + active/空 url 守卫）', () => {
+describe('useImgChain 计时门控源锚（评审 R1-1/R1-4：settled 解除 + active/空 url 守卫；ADR-0023 T10：随迁 chrome.jsx）', () => {
   it('8s 守卫四条件齐备（url/active/settled/needsTimeout），依赖数组含 settled；onLoad 置 settled', () => {
-    assert.ok(mainSrc.includes('if (!url || !active || settled || !needsTimeout(tier)) return;'), '守卫四条件')
-    assert.ok(mainSrc.includes('[url, active, settled, tier]'), 'timer effect 依赖数组')
-    assert.ok(/onLoad = useCallback\(\(\) => \{\s*setSettled\(true\);\s*rememberSuccess\(bucket, tier\);/.test(mainSrc), 'onLoad 先置 settled 再记成功')
-    assert.ok(/setSettled\(false\);[\s\S]{0,80}setTier\(tierOrder\(startPrefRef\.current\)\[0\]\)/.test(mainSrc), 'startChain 重置 settled 与 tier')
+    assert.ok(chromeSrc.includes('if (!url || !active || settled || !needsTimeout(tier)) return;'), '守卫四条件')
+    assert.ok(chromeSrc.includes('[url, active, settled, tier]'), 'timer effect 依赖数组')
+    assert.ok(/onLoad = useCallback\(\(\) => \{\s*setSettled\(true\);\s*rememberSuccess\(bucket, tier\);/.test(chromeSrc), 'onLoad 先置 settled 再记成功')
+    assert.ok(/setSettled\(false\);[\s\S]{0,80}setTier\(tierOrder\(startPrefRef\.current\)\[0\]\)/.test(chromeSrc), 'startChain 重置 settled 与 tier')
   })
   it('url 变化走渲染期 derived-state 重置（评审 R1-5：无中间帧）', () => {
-    assert.ok(/const \[prevUrl, setPrevUrl\] = useState\(url\);[\s\S]{0,200}if \(prevUrl !== url\) \{/.test(mainSrc), 'prevUrl 渲染期比较')
+    assert.ok(/const \[prevUrl, setPrevUrl\] = useState\(url\);[\s\S]{0,200}if \(prevUrl !== url\) \{/.test(chromeSrc), 'prevUrl 渲染期比较')
   })
 })
 
-describe('main.jsx 接线源锚（实施计划 Task 3：Shot + 截图条四处基准 + 稳定 key）', () => {
+describe('接线源锚（实施计划 Task 3：Shot + 截图条四处基准 + 稳定 key；ADR-0023 T10：Shot 段随迁 chrome.jsx）', () => {
   it('Shot 走链：h=300 + active:show（IO 门控计时），img 用 chain.src 且保留既有属性', () => {
-    assert.ok(mainSrc.includes('useImgChain(src, { h: 300, active: show })'), 'Shot 内 useImgChain(src, { h: 300, active: show })')
-    const shotSeg = mainSrc.slice(mainSrc.indexOf('function Shot('), mainSrc.indexOf('function Lightbox('))
+    assert.ok(chromeSrc.includes('useImgChain(src, { h: 300, active: show })'), 'Shot 内 useImgChain(src, { h: 300, active: show })')
+    const shotSeg = chromeSrc.slice(chromeSrc.indexOf('function Shot('), chromeSrc.indexOf('function Lightbox('))
     assert.ok(shotSeg.includes('src: chain.src'), 'img src 用 chain.src')
     assert.ok(shotSeg.includes('decoding: "async"'), 'decoding=async')
     assert.ok(shotSeg.includes('loading: "lazy"') && shotSeg.includes('fetchPriority: "low"') && shotSrcKeepsReferrer(shotSeg), 'lazy/low/referrerPolicy 保留')
     function shotSrcKeepsReferrer(seg) { return seg.includes('referrerPolicy: "no-referrer"') }
   })
   it('onBroken 在 effect 中上报（渲染体内不得直调父 setState），失败渲染 null', () => {
-    const shotSeg = mainSrc.slice(mainSrc.indexOf('function Shot('), mainSrc.indexOf('function Lightbox('))
+    const shotSeg = chromeSrc.slice(chromeSrc.indexOf('function Shot('), chromeSrc.indexOf('function Lightbox('))
     assert.ok(/useEffect\(\(\) => \{[\s\S]{0,120}onBroken\(src\)/.test(shotSeg), 'onBroken 经 useEffect 调用')
     assert.ok(shotSeg.includes('chain.failed ? null'), '失败渲 null')
   })
   it('DetailModal：visible 过滤 + 去重合并 broken + 四处 shots→visible 基准 + 稳定 key + 钳制', () => {
-    const modalSeg = mainSrc.slice(mainSrc.indexOf('function DetailModal('), mainSrc.indexOf('// ---------- 市场页'))
+    const modalSeg = detailModalSrc.slice(detailModalSrc.indexOf('function DetailModal('))
     assert.ok(modalSeg.includes('visible'), 'visible 派生在')
     assert.ok(/prev\.includes\(src\) \? prev : prev\.concat\(src\)/.test(modalSeg) || /prev\.includes\(/.test(modalSeg), 'broken 去重合并')
     assert.ok(/shots\.filter\(\(src\) => !broken/.test(modalSeg) || /filter\(\(src\) => !brokenShots\.includes/.test(modalSeg), 'visible 过滤式')
@@ -170,8 +174,8 @@ describe('main.jsx 接线源锚（实施计划 Task 3：Shot + 截图条四处�
     assert.ok(modalSeg.includes('shots: visible'), '灯箱收 visible 活引用')
     assert.ok(modalSeg.includes('Math.min(lb, visible.length - 1)'), 'index 钳制')
   })
-  it('Lightbox 走链（w=1600）+ 双败占位三件（重试/打开原图）+ i18n 三键', () => {
-    const lbSeg = mainSrc.slice(mainSrc.indexOf('function Lightbox('), mainSrc.indexOf('function DetailModal('))
+  it('Lightbox 走链（w=1600）+ 双败占位三件（重试/打开原图）+ i18n 三键（ADR-0023 T10：切片随迁 chrome.jsx，右界改 XIcon）', () => {
+    const lbSeg = chromeSrc.slice(chromeSrc.indexOf('function Lightbox('), chromeSrc.indexOf('function XIcon('))
     assert.ok(lbSeg.includes('useImgChain(shots[index], { w: 1600 })'), '灯箱 w=1600 走链')
     assert.ok(lbSeg.includes('className: "dsvm-lbfail"'), '占位容器 dsvm-lbfail')
     assert.ok(lbSeg.includes('chain.retry'), '重试接 chain.retry')
@@ -201,7 +205,7 @@ describe('详情截图条统一瓷砖 CSS 锚（0.9.73：修「大小不一 + fl
 })
 
 describe('Primary screenshot DetailModal source（GUI only）', () => {
-  const modalSeg = mainSrc.slice(mainSrc.indexOf('function DetailModal('), mainSrc.indexOf('// ---------- 市场页'))
+  const modalSeg = detailModalSrc.slice(detailModalSrc.indexOf('function DetailModal('))
 
   it('Primary entry 按 id 读取 Host manifest；Community live item 使用目录截图', () => {
     assert.ok(modalSeg.includes('primaryShots'), '截图 URL 保存在 DetailModal 局部 state')
@@ -213,8 +217,8 @@ describe('Primary screenshot DetailModal source（GUI only）', () => {
 
   it('owner-only Community snapshot 不触发 Primary reader；favorite lookup 仍 all 后 snapshot fallback', () => {
     assert.ok(modalSeg.includes('it.owner'), 'owner-only 社区收藏快照识别在')
-    assert.ok(mainSrc.includes('api("market", { query: id, source: "all", limit: 8 })'), 'openFavDetail 既有跨区回查不改')
-    const snapshotSeg = mainSrc.slice(mainSrc.indexOf('function snapshotOf('), mainSrc.indexOf('function FavoriteZone('))
+    assert.ok(marketTabSrc.includes('api("market", { query: id, source: "all", limit: 8 })'), 'openFavDetail 既有跨区回查不改')
+    const snapshotSeg = cardSrc.slice(cardSrc.indexOf('function snapshotOf('))
     assert.doesNotMatch(snapshotSeg, /screenshots/, 'favorite snapshot 不持久化图库 URL')
   })
 

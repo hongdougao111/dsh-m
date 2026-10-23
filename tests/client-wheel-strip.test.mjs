@@ -88,10 +88,10 @@ describe('shotWheelAction（0.9.74 钢人三红线）', () => {
   })
 })
 
-describe('main.jsx 截图条滚轮接线源锚（0.9.74）', () => {
-  const modalSeg = mainSrc.slice(mainSrc.indexOf('function DetailModal('), mainSrc.indexOf('// ---------- 市场页'))
+describe('截图条滚轮接线源锚（0.9.74；切片随 DetailModal 迁 detail-modal.jsx——ADR-0023 T11）', () => {
+  const modalSeg = readFileSync(new URL('../src/client/detail-modal.jsx', import.meta.url), 'utf8')
   it('接线三件：手动 addEventListener({passive:false}) + 事件内现读布局 + visible.length 重挂', () => {
-    assert.ok(mainSrc.includes('const { shotWheelAction } = require("./wheel-strip.js")'), '纯函数 require 在')
+    assert.ok(modalSeg.includes('from "./wheel-strip.js"'), '纯函数消费在（ESM import，detail-modal.jsx）')
     assert.ok(/addEventListener\("wheel", onWheel, \{ passive: false \}\)/.test(modalSeg), '手动挂 wheel（React onWheel passive 委托不可 preventDefault）')
     assert.ok(/removeEventListener\("wheel", onWheel\)/.test(modalSeg), '卸载移除')
     assert.ok(modalSeg.includes('row.scrollWidth, clientWidth: row.clientWidth, scrollLeft: row.scrollLeft'), '判定入参逐事件现读（无缓存失效问题）')

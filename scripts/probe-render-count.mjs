@@ -26,37 +26,48 @@ const outArg = argv.indexOf('--out')
 const OUT = join(root, outArg >= 0 ? argv[outArg + 1] : 'node_modules/.dshm/render-probe')
 mkdirSync(OUT, { recursive: true })
 
-// ---- ① 源变换：插桩（断言每处恰好命中一次） ----
-const src0 = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
+// ---- ① 源变换：多源插桩（ADR-0023 T13：组件分文件后按文件落锚；断言每处恰好命中一次） ----
+// 方法：复制 src/client 全部 .js/.jsx 到探针目录做就地插桩——相对 require 在副本内闭合，
+// 计数器/Profiler 注入语义与单源时代逐字相同，仅装载层多源化。
+import { readdirSync, copyFileSync } from 'node:fs'
 const patched = []
-const sub1 = (s, from, to, name) => {
-  const n = s.split(from).length - 1
-  if (n !== 1) throw new Error(`插桩锚点「${name}」命中 ${n} 次（应为 1）——main.jsx 已漂移，先更新探针锚点`)
-  patched.push(name)
-  return s.replace(from, to)
+const SRC_DIR = join(root, 'src/client')
+const probeDir = join(OUT, 'client-src')
+rmSync(probeDir, { recursive: true, force: true })
+mkdirSync(probeDir, { recursive: true })
+for (const f of readdirSync(SRC_DIR)) {
+  if (f.endsWith('.js') || f.endsWith('.jsx')) copyFileSync(join(SRC_DIR, f), join(probeDir, f))
 }
-let src = src0
-src = sub1(src,
+const sub1 = (f, from, to, name) => {
+  let s = readFileSync(join(probeDir, f), 'utf8')
+  const n = s.split(from).length - 1
+  if (n !== 1) throw new Error(`插桩锚点「${name}」在 ${f} 命中 ${n} 次（应为 1）——源已漂移，先更新探针锚点`)
+  patched.push(name + '@' + f)
+  s = s.replace(from, to)
+  writeFileSync(join(probeDir, f), s)
+  return s
+}
+sub1('card.jsx',
   'function Card({ icon, name, badges, desc, sub, links, open, onToggle, detail, actions, topRight, byline, clampLines }) {',
   'function Card({ icon, name, badges, desc, sub, links, open, onToggle, detail, actions, topRight, byline, clampLines }) {\n  if (typeof window !== "undefined" && window.__dshmProbe) window.__dshmProbe.cards++;',
   'Card 计数')
-src = sub1(src,
+sub1('chrome.jsx',
   'function Icon({ entry }) {',
   'function Icon({ entry }) {\n  if (typeof window !== "undefined" && window.__dshmProbe) window.__dshmProbe.icons++;',
   'Icon 计数')
-src = sub1(src,
+sub1('market-tab.jsx',
   'function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, onOpenOps }) {',
   'function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, onOpenOps }) {\n  if (typeof window !== "undefined" && window.__dshmProbe) window.__dshmProbe.tabs++;',
   'MarketTab 计数')
-src = sub1(src,
+let mainSrc = sub1('main.jsx',
   'tab === "market" ? h(MarketTab, { notify, markets, onMutation: refreshViews, ops, favorites, profileKind: profile?.kind ?? null, onOpenOps: openOps }) : null',
   'tab === "market" ? h(React.Profiler, { id: "market-tab", onRender: __dshmProbeOnRender }, h(MarketTab, { notify, markets, onMutation: refreshViews, ops, favorites, profileKind: profile?.kind ?? null, onOpenOps: openOps })) : null',
   'Profiler 包裹')
-src = `function __dshmProbeOnRender(id, phase, actualDuration) { if (typeof window !== "undefined" && window.__dshmProbe) { window.__dshmProbe.commits++; window.__dshmProbe.renderMs += actualDuration; } }\n${src}\nmodule.exports = { __Apply: apply, __MountPanel: mountPanel };\n`
+mainSrc = `function __dshmProbeOnRender(id, phase, actualDuration) { if (typeof window !== "undefined" && window.__dshmProbe) { window.__dshmProbe.commits++; window.__dshmProbe.renderMs += actualDuration; } }\n${mainSrc}\nmodule.exports = { __Apply: apply, __MountPanel: mountPanel };\n`
+writeFileSync(join(probeDir, 'main.jsx'), mainSrc)
 
-// ---- ② 打包（browser UMD 装载同 verify-panel-mobile） ----
-const entry = join(root, 'src/client/.probe-render-entry.jsx')
-writeFileSync(entry, src)
+// ---- ② 打包（browser UMD 装载同 verify-panel-mobile；entry = 副本 main.jsx，相对 require 闭合于副本） ----
+const entry = join(probeDir, 'main.jsx')
 let bundle
 try {
   await esbuild.build({
@@ -65,8 +76,8 @@ try {
     loader: { '.jsx': 'jsx' }, logLevel: 'silent',
   })
   bundle = readFileSync(join(OUT, 'bundle.cjs'), 'utf8')
-} finally {
-  try { rmSync(entry, { force: true }) } catch { /* 清理失败不阻塞 */ }
+} catch (e) {
+  throw e
 }
 // profiling UMD = 生产速度 + Profiler onRender 可用（比 development UMD 诚实：不带 dev 版约 2× 的开销）
 const reactUmd = readFileSync(join(root, 'node_modules/react/umd/react.profiling.min.js'), 'utf8')

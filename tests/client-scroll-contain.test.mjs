@@ -49,42 +49,45 @@ describe('0.9.72 滚轮治理：contain 条件挂载（滚轮黑洞修复）', (
     )
   })
 
-  it('hook 在：实测可滚才挂类，ResizeObserver 缺席（SSR/Node）安全跳过', () => {
-    assert.ok(src.includes('function useScrollableContain(dep)'), 'useScrollableContain 定义在')
+  it('hook 在：实测可滚才挂类，ResizeObserver 缺席（SSR/Node）安全跳过（ADR-0023 T9：hook 迁 hooks.js，锚随迁）', () => {
+    const hooksSrc = readFileSync(join(root, 'src/client/hooks.js'), 'utf8')
+    assert.ok(hooksSrc.includes('function useScrollableContain(dep)'), 'useScrollableContain 定义在')
     assert.ok(
-      src.includes('if (!el || typeof ResizeObserver === "undefined") return;'),
+      hooksSrc.includes('if (!el || typeof ResizeObserver === "undefined") return;'),
       'ResizeObserver 缺席守卫在（renderToString 冒烟路径不炸）',
     )
     assert.ok(
-      src.includes('setScrollable(el.scrollHeight > el.clientHeight + 1);'),
+      hooksSrc.includes('setScrollable(el.scrollHeight > el.clientHeight + 1);'),
       '可滚判定 = scrollHeight 严格超出（+1 容亚像素取整）',
     )
   })
 
-  it('三处接线在：操作记录滚动区 / 重启横幅 / toast', () => {
+  it('三处接线在：操作记录滚动区（operations-card.jsx）/ 重启横幅（chrome.jsx）/ toast（main.jsx）——ADR-0023 T10 随组件分文件各锚', () => {
+    const chromeSrc = readFileSync(join(root, 'src/client/chrome.jsx'), 'utf8')
+    const ocSrc = readFileSync(join(root, 'src/client/operations-card.jsx'), 'utf8')
     assert.ok(
-      src.includes('className: `dshm-ops-scroll${scrollCls}`'),
-      '操作记录滚动区接线在',
+      ocSrc.includes('className: `dshm-ops-scroll${scrollCls}`'),
+      '操作记录滚动区接线在（operations-card.jsx）',
     )
     assert.ok(
-      src.includes('tabIndex: 0') && src.includes('"aria-label": lookup("settings.ops")'),
+      ocSrc.includes('tabIndex: 0') && ocSrc.includes('"aria-label": lookup("settings.ops")'),
       '滚动区键盘可达（0.9.45 U8 纪律延续）',
     )
     assert.ok(
-      src.includes('useScrollableContain(finished.length)'),
+      ocSrc.includes('useScrollableContain(finished.length)'),
       '滚动区内容键 = 已结束条数',
     )
     assert.ok(
-      src.includes('className: `dshm-banner-text${textScrollCls}`'),
-      '重启横幅接线在',
+      chromeSrc.includes('className: `dshm-banner-text${textScrollCls}`'),
+      '重启横幅接线在（chrome.jsx）',
     )
     assert.ok(
       src.includes('useScrollableContain(toast ? toast.text : "")'),
-      'toast 内容键在',
+      'toast 内容键在（MarketPanel，main.jsx 保留区）',
     )
     assert.ok(
       src.includes('className: `dshm-banner-text${toastScrollCls}`'),
-      'toast 接线在',
+      'toast 接线在（main.jsx 保留区）',
     )
   })
 })

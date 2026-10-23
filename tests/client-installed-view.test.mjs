@@ -103,14 +103,16 @@ describe('installedViewModel：0.4.0 相位/开关字段（Task 17）', () => {
 describe('已装列表升级入口零特判（0.10.0 Task 11 ④）', () => {
   const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
 
-  it('已装列表 doUpgrade 走通用 upgrade API，零 self-upgrade/SELF_PKG/dsh-m 特判', () => {
-    const first = src.indexOf('const doUpgrade = async (it) => {')
-    assert.ok(first >= 0, '市场卡升级站点在')
-    const start = src.indexOf('const doUpgrade = async (it) => {', first + 1)
-    assert.ok(start > first, '已装列表升级站点在（第二处同名函数）')
-    const end = src.indexOf('if (loading && !data) return', start)
-    assert.ok(end > start, '切片边界在')
-    const body = src.slice(start, end)
+  it('已装列表 doUpgrade 走通用 upgrade API，零 self-upgrade/SELF_PKG/dsh-m 特判（ADR-0023 T11：切片随 Tab 出仓分文件）', () => {
+    const mt = readFileSync(new URL('../src/client/market-tab.jsx', import.meta.url), 'utf8')
+    const itSrc = readFileSync(new URL('../src/client/installed-tab.jsx', import.meta.url), 'utf8')
+    const first = mt.indexOf('const doUpgrade = async (it) => {')
+    assert.ok(first >= 0, '市场卡升级站点在（market-tab.jsx）')
+    const start = itSrc.indexOf('const doUpgrade = async (it) => {')
+    assert.ok(start >= 0, '已装列表升级站点在（installed-tab.jsx）')
+    const end = itSrc.indexOf('if (loading && !data) return', start)
+    assert.ok(end > start, '切片边界在（installed-tab.jsx）')
+    const body = itSrc.slice(start, end)
     assert.ok(body.includes('api("upgrade", { pkg: it.pkg })'), '走通用 upgrade API')
     assert.ok(!body.includes('self-upgrade'), '零 self-upgrade 特判')
     assert.ok(!body.includes('SELF_PKG'), '零 SELF_PKG 特判')

@@ -65,9 +65,12 @@ describe('installedUpdateStats', () => {
 })
 
 // ---------- 0.10.0 Task 10：降级恢复结局站点接线（main.jsx 源串结构锚；单行锚——避开 CRLF 多行锚陷阱） ----------
-describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表两处升级站点）', () => {
-  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
-  const count = (needle) => src.split(needle).length - 1
+describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表两处升级站点；ADR-0023 T11：站点随 Tab 出仓，计数改双文件合计）', () => {
+  const marketTabSrc = readFileSync(new URL('../src/client/market-tab.jsx', import.meta.url), 'utf8')
+  const installedTabSrc = readFileSync(new URL('../src/client/installed-tab.jsx', import.meta.url), 'utf8')
+  const both = marketTabSrc + '\n' + installedTabSrc
+  const src = both
+  const count = (needle) => both.split(needle).length - 1
 
   it('① 两处升级站点都先问降级分支（恰两处）', () => {
     assert.equal(count('const degraded = oc.degradedOutcome(res);'), 2, '市场卡 doUpgrade + 已装列表 doUpgrade 各一处')
@@ -90,19 +93,23 @@ describe('降级恢复站点接线（0.10.0 Task 10：市场卡 + 已装列表�
 })
 
 // ---------- 0.10.3（挂账 1 数据面）：升级目标版随 enqueue 落 meta（中断恢复对账的比对依据） ----------
-describe('升级 enqueue meta 携带 toVersion（0.10.3：三站点单行锚）', () => {
-  const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+// ADR-0023 T10：chip 站点锚（:97）随 DshmVersionChip 迁 version-chip.jsx；其余站点留 main.jsx
+describe('升级 enqueue meta 携带 toVersion（0.10.3：三站点单行锚；ADR-0023 T11：站点随 Tab/chip 出仓分锚）', () => {
+  const versionChipSrc = readFileSync(new URL('../src/client/version-chip.jsx', import.meta.url), 'utf8')
+  const marketTabSrc = readFileSync(new URL('../src/client/market-tab.jsx', import.meta.url), 'utf8')
+  const installedTabSrc = readFileSync(new URL('../src/client/installed-tab.jsx', import.meta.url), 'utf8')
+  const src = marketTabSrc + '\n' + installedTabSrc
   const count = (needle) => src.split(needle).length - 1
 
-  it('① chip 静默升级以运行时探测的 latest 为目标版', () => {
-    assert.equal(count('{ npm: "dsh-m", toVersion: state.latest }'), 1)
+  it('① chip 静默升级以运行时探测的 latest 为目标版（version-chip.jsx——ADR-0023 T10）', () => {
+    assert.equal(versionChipSrc.split('{ npm: "dsh-m", toVersion: state.latest }').length - 1, 1)
   })
 
-  it('② 已装列表以 updates 合并的 latestVersion 为目标版', () => {
-    assert.equal(count('{ toVersion: it.latestVersion }'), 1)
+  it('② 已装列表以 updates 合并的 latestVersion 为目标版（installed-tab.jsx）', () => {
+    assert.equal(installedTabSrc.split('{ toVersion: it.latestVersion }').length - 1, 1)
   })
 
-  it('③ 市场卡以卡片 latest 为目标版（升级站点 meta 原为空对象，第 4 参落 meta）', () => {
-    assert.equal(count('{ toVersion: it.latest }'), 1, '市场卡 doUpgrade meta 锚')
+  it('③ 市场卡以卡片 latest 为目标版（升级站点 meta 原为空对象，第 4 参落 meta；market-tab.jsx）', () => {
+    assert.equal(marketTabSrc.split('{ toVersion: it.latest }').length - 1, 1, '市场卡 doUpgrade meta 锚')
   })
 })

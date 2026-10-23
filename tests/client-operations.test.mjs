@@ -425,13 +425,14 @@ describe('createOpsPump（0.7.0 评审 P4：生产泵的直接测试）', () => 
       assert.equal(store.list().find((r) => r.id === 'n3').meta.degraded, undefined, '非降级零 meta 污染')
     })
 
-    it('③ 徽标口径与 × 删除通道零改动（main.jsx 源锚）：warned 计入红点、× 走既有 op.remove', () => {
+    it('③ 徽标口径与 × 删除通道零改动（源锚，ADR-0023 T10：× 通道锚随 OperationsCard 迁 operations-card.jsx）', () => {
       const src = readFileSync(new URL('../src/client/main.jsx', import.meta.url), 'utf8')
+      const ocSrc = readFileSync(new URL('../src/client/operations-card.jsx', import.meta.url), 'utf8')
       assert.ok(
         src.includes('const opsAttention = opRecords.some((r) => r.status === "failed" || r.status === "warned");'),
-        '红点口径 failed||warned 原样在——dismiss（移除记录）后随 syncOps 自灭（R13 徽标清零路径）',
+        '红点口径 failed||warned 原样在（MarketPanel，main.jsx 保留区）——dismiss（移除记录）后随 syncOps 自灭（R13 徽标清零路径）',
       )
-      assert.ok(src.includes('title: lookup("op.remove")'), '× 删除走既有 op.remove 通道（删除仅移除记录，不改真实插件状态字段）')
+      assert.ok(ocSrc.includes('title: lookup("op.remove")'), '× 删除走既有 op.remove 通道（operations-card.jsx；删除仅移除记录，不改真实插件状态字段）')
     })
   })
 })

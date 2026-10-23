@@ -37,13 +37,14 @@ test("0.9.83 标题双 span 切换（共识 Q5）", () => {
   assert.ok(src.includes('lookup("title.panel")'), "短标题用现成 title.panel key");
 });
 
-test("0.9.83 版本 chip 窄容器收拢（共识 Q7 + 评审 R5 专属类收窄）", () => {
+test("0.9.83 版本 chip 窄容器收拢（共识 Q7 + 评审 R5 专属类收窄；JSX 面随 chip 迁 version-chip.jsx——ADR-0023 T10）", () => {
+  const versionChipSrc = readFileSync(join(root, "src/client/version-chip.jsx"), "utf8");
   assert.ok(stylesSrc.includes(".dshm-head>.dshm-verchip:not(.warn){display:none}"), "常态版本 chip 隐藏在（profile 徽标不命中）");
   assert.ok(stylesSrc.includes(".dshm-verchip.warn .dshm-dshchip-name,.dshm-verchip.warn .dshm-dshchip-v,.dshm-verchip.warn .dshm-up-v{display:none}"), "warn 收拢为 icon 在");
-  assert.ok(src.includes('className: "dshm-dshchip dshm-verchip"'), "常态分支专属类在");
-  assert.ok(src.includes('className: "dshm-dshchip dshm-verchip warn"'), "warn 分支专属类在");
-  assert.ok(src.includes('className: "dshm-dshchip-name"'), "前缀文本节点已包 span");
-  assert.ok(src.includes('className: "dshm-up-v"'), "升级版本号文本节点已包 span");
+  assert.ok(versionChipSrc.includes('className: "dshm-dshchip dshm-verchip"'), "常态分支专属类在（version-chip.jsx）");
+  assert.ok(versionChipSrc.includes('className: "dshm-dshchip dshm-verchip warn"'), "warn 分支专属类在（version-chip.jsx）");
+  assert.ok(versionChipSrc.includes('className: "dshm-dshchip-name"'), "前缀文本节点已包 span（version-chip.jsx）");
+  assert.ok(versionChipSrc.includes('className: "dshm-up-v"'), "升级版本号文本节点已包 span（version-chip.jsx）");
 });
 
 test("0.9.83 窄视口默认全屏初始化（共识 Q9）", () => {

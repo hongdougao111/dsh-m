@@ -20,6 +20,16 @@ const src = readFileSync(join(root, 'src/client/main.jsx'), 'utf8')
 // ADR-0023 第一刀：词典定义面锚改读 i18n.js；CSS 锚改读 styles.js（调用面锚仍读 main.jsx）
 const i18nSrc = readFileSync(join(root, 'src/client/i18n.js'), 'utf8')
 const stylesSrc = readFileSync(join(root, 'src/client/styles.js'), 'utf8')
+// ADR-0023 T10：批次一出仓组件的接线锚改读新文件
+const chromeSrc = readFileSync(join(root, 'src/client/chrome.jsx'), 'utf8')
+const cardSrc = readFileSync(join(root, 'src/client/card.jsx'), 'utf8')
+const zoneChipsSrc = readFileSync(join(root, 'src/client/zone-chips.jsx'), 'utf8')
+const versionChipSrc = readFileSync(join(root, 'src/client/version-chip.jsx'), 'utf8')
+// ADR-0023 T11：批次二出仓组件锚改读新文件
+const detailModalSrc = readFileSync(join(root, 'src/client/detail-modal.jsx'), 'utf8')
+const marketTabSrc = readFileSync(join(root, 'src/client/market-tab.jsx'), 'utf8')
+const installedTabSrc = readFileSync(join(root, 'src/client/installed-tab.jsx'), 'utf8')
+const settingsTabSrc = readFileSync(join(root, 'src/client/settings-tab.jsx'), 'utf8')
 // 入口必须与 main.jsx 同目录（相对 require ./market-state.js 等才能解析）；构建后即删
 const dir = join(root, 'src/client')
 const entry = join(dir, '.render-smoke-entry.jsx')
@@ -29,12 +39,27 @@ mkdirSync(outDir, { recursive: true })
 const out = join(outDir, 'render-smoke.cjs')
 let mod
 try {
+  // ADR-0023 T11 终态：全部出仓组件直接 require 新文件；追加导出仅剩 MarketPanel（组合根，main.jsx 保留区）
   writeFileSync(
     entry,
     src +
       '\n// ---- 测试追加导出（不进生产：build.mjs 打包的是 main.jsx 本体，此文件不入库不发布）----\n' +
-      'module.exports = { __MarketPanel: MarketPanel, __InstalledTab: InstalledTab, __SearchBox: SearchBox, __ZoneChips: ZoneChips, __FavoriteZone: FavoriteZone, __DshmVersionChip: DshmVersionChip, __RestartBanner: RestartBanner, __DetailModal: DetailModal, __Lightbox: Lightbox, __UseImgChainProbe: UseImgChainProbe };\n',
+      'module.exports = { __MarketPanel: MarketPanel };\n',
   )
+  const compEntry = join(dir, '.render-smoke-components-entry.jsx')
+  writeFileSync(
+    compEntry,
+    'const { SearchBox, RestartBanner, Lightbox, UseImgChainProbe } = require("./chrome.jsx");\n' +
+      'const { ZoneChips } = require("./zone-chips.jsx");\n' +
+      'const { FavoriteZone } = require("./favorite-zone.jsx");\n' +
+      'const { DshmVersionChip } = require("./version-chip.jsx");\n' +
+      'const { DetailModal } = require("./detail-modal.jsx");\n' +
+      'const { InstalledTab } = require("./installed-tab.jsx");\n' +
+      'const { MarketTab } = require("./market-tab.jsx");\n' +
+      'const { OperationsCard } = require("./operations-card.jsx");\n' +
+      'module.exports = { __SearchBox: SearchBox, __ZoneChips: ZoneChips, __FavoriteZone: FavoriteZone, __DshmVersionChip: DshmVersionChip, __RestartBanner: RestartBanner, __Lightbox: Lightbox, __UseImgChainProbe: UseImgChainProbe, __DetailModal: DetailModal, __InstalledTab: InstalledTab, __MarketTab: MarketTab, __OperationsCard: OperationsCard };\n',
+  )
+  const compOut = join(outDir, 'render-smoke-components.cjs')
   await build({
     entryPoints: [entry],
     bundle: true,
@@ -45,19 +70,30 @@ try {
     loader: { '.jsx': 'jsx' },
     logLevel: 'silent',
   })
+  await build({
+    entryPoints: [compEntry],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile: compOut,
+    external: ['react', 'react-dom'],
+    loader: { '.jsx': 'jsx' },
+    logLevel: 'silent',
+  })
   const require2 = createRequire(import.meta.url)
   const React = require2(join(root, 'node_modules/react'))
   const { renderToString } = require2(join(root, 'node_modules/react-dom/server'))
-  mod = { React, renderToString, mod: require2(out) }
+  mod = { React, renderToString, mod: require2(out), comps: require2(compOut) }
 } finally {
   try {
     rmSync(entry, { force: true })
+    rmSync(join(dir, '.render-smoke-components-entry.jsx'), { force: true })
   } catch {
     /* 清理失败不阻塞测试 */
   }
 }
 const { React, renderToString } = mod
-const components = mod.mod
+const components = { ...mod.mod, ...mod.comps }
 const h = React.createElement
 
 describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门', () => {
@@ -127,13 +163,13 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
       labels: null, active: null, onPick: () => {}, trailing: null,
     }))
     assert.equal((html.match(/data-chip="1"/g) || []).length, 6, '精选区=全部+固定五类')
-    assert.match(src, /const chipsSignature = JSON\.stringify\(chips\.map/, '分类内容签名而非不稳定的对象引用')
-    assert.match(src, /\[chipsSignature, active, expanded, zone, stuck, rowHeight, measure\]/, '布局测量不依赖自身的 geom')
-    assert.match(src, /if \(existing\.querySelector\("\.dshm-panel"\)\) return;\s*existing\.remove\(\);/, '崩溃遗留空容器不得永久阻挡重新打开')
+    assert.match(zoneChipsSrc, /const chipsSignature = JSON\.stringify\(chips\.map/, '分类内容签名而非不稳定的对象引用')
+    assert.match(zoneChipsSrc, /\[chipsSignature, active, expanded, zone, stuck, rowHeight, measure\]/, '布局测量不依赖自身的 geom')
+    assert.match(src, /if \(existing\.querySelector\("\.dshm-panel"\)\) return;\s*existing\.remove\(\);/, '崩溃遗留空容器不得永久阻挡重新打开（挂载区，main.jsx 保留）')
     assert.match(stylesSrc, /\.dshm-chips\.dshm-chips-clip\.dshm-chips-gutter\.dshm-chips-reserve\{padding-right:calc\(var\(--dshm-clip-gutter,96px\) \+ 60px\)\}/, '社区区 +N/筛选右侧槽不被 gutter 覆盖')
-    assert.match(src, /const moreLeft = geom \? geom\.lastVisRight \+ 6 : 0;/, '+N 动态紧贴末可见 chip，而非固定在筛选旁')
-    assert.match(src, /const moreHeight = geom \? geom\.lastVisHeight/, '+N 框高来自最后可见分类的实测高度')
-    assert.match(src, /height: `\$\{moreHeight\}px`/, '+N 显式应用与分类相同的边框高度')
+    assert.match(zoneChipsSrc, /const moreLeft = geom \? geom\.lastVisRight \+ 6 : 0;/, '+N 动态紧贴末可见 chip，而非固定在筛选旁')
+    assert.match(zoneChipsSrc, /const moreHeight = geom \? geom\.lastVisHeight/, '+N 框高来自最后可见分类的实测高度')
+    assert.match(zoneChipsSrc, /height: `\$\{moreHeight\}px`/, '+N 显式应用与分类相同的边框高度')
   })
 
   it('FavoriteZone 带一条收藏快照渲染不抛（卡片路径）', () => {
@@ -292,18 +328,19 @@ describe('client 渲染冒烟（SSR）——自由变量/接线炸弹回归门',
 
 // ---------- 0.9.45 市场页两段加载（ADR-0013）+ P2 设置页强刷接线 ----------
 
-describe('0.9.45 两段加载接线（源码断言）', () => {
+describe('0.9.45 两段加载接线（源码断言；ADR-0023 T9：useMarketData 迁 hooks.js，锚随迁）', () => {
   it('市场页两段加载接线（0.9.45 ADR-0013，R2 修正断言形态）', () => {
-    assert.match(src, /probeMode = "cache-only"/, '第一段默认 cache-only（默认参数形态）')
-    assert.match(src, /latestComplete === false/, '以 latestComplete 缺口判定发起第二段')
-    assert.match(src, /return fetchPage\(nextQuery, force, true, "full"\)/, '第二段 background 换新（force 走入参，core peek 重探）')
-    assert.match(src, /mergeLatestFields\(/, '徽标不回退 merge 接线')
+    const hooksSrc = readFileSync(join(root, 'src/client/hooks.js'), 'utf8')
+    assert.match(hooksSrc, /probeMode = "cache-only"/, '第一段默认 cache-only（默认参数形态）')
+    assert.match(hooksSrc, /latestComplete === false/, '以 latestComplete 缺口判定发起第二段')
+    assert.match(hooksSrc, /return fetchPage\(nextQuery, force, true, "full"\)/, '第二段 background 换新（force 走入参，core peek 重探）')
+    assert.match(hooksSrc, /mergeLatestFields\(/, '徽标不回退 merge 接线')
   })
 
-  it('P2 接线：设置页强刷 → 市场区 force 重取（R4）', () => {
-    assert.match(src, /onForceMarket/, 'SettingsTab 新增强刷回调 prop')
-    assert.match(src, /marketReloadAll\(true\)/, '强刷回调以 force 重取两区')
-    assert.match(src, /refresh = async \(\) => \{[\s\S]{0,600}onForceMarket\?\.\(\)/, 'refresh 成功路径触发市场强取')
+  it('P2 接线：设置页强刷 → 市场区 force 重取（R4；ADR-0023 T11：SettingsTab 锚随迁 settings-tab.jsx，接线锚留 main.jsx）', () => {
+    assert.match(settingsTabSrc, /onForceMarket/, 'SettingsTab 新增强刷回调 prop（settings-tab.jsx）')
+    assert.match(src, /marketReloadAll\(true\)/, '强刷回调以 force 重取两区（MarketPanel，main.jsx 保留区）')
+    assert.match(settingsTabSrc, /refresh = async \(\) => \{[\s\S]{0,600}onForceMarket\?\.\(\)/, 'refresh 成功路径触发市场强取（settings-tab.jsx）')
   })
 
   it('详情 Modal：已装且可升级 → 「升级」主按钮；已装未过期 → 仅 manage 提示（0.9.45 U10）', () => {
@@ -312,8 +349,8 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
     assert.match(up, /dsvm-modalactions[\s\S]*?dshm-btn primary/, 'outdated → 动作区主按钮在（语言无关）')
     const ok = renderToString(h(components.__DetailModal, { it: base, labels: {}, busy: false, onClose: () => {}, onInstall: () => {}, onUpgrade: () => {}, upgradeBusy: false, profileKind: 'web' }))
     assert.doesNotMatch(ok, /dsvm-modalactions[\s\S]*?dshm-btn primary/, '非 outdated → 动作区无主按钮')
-    assert.match(src, /ops\.runOp\("upgrade", it\.installedPkg/, 'record.target = 安装包名（R1：upgrade record 语义是 pkg）')
-    assert.match(src, /activeUpgradeRec\.target === detailItem\.installedPkg/, '进度行比对走 installedPkg（R1）')
+    assert.match(marketTabSrc, /ops\.runOp\("upgrade", it\.installedPkg/, 'record.target = 安装包名（R1：upgrade record 语义是 pkg；Modal 升级按钮由 MarketTab 供给——ADR-0023 T11 在 market-tab.jsx）')
+    assert.match(marketTabSrc, /activeUpgradeRec\.target === detailItem\.installedPkg/, '进度行比对走 installedPkg（R1；market-tab.jsx）')
   })
 
   it('详情 Modal：README 折叠页（npm 条目）与收录日期 fmtDate（0.9.45 U10b）', () => {
@@ -322,13 +359,13 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
     assert.ok(html.includes('dsvm-fold'), 'README 折叠容器在')
     assert.ok(html.includes('📖 README'), '折叠摘要用既有 readme.show 文案（emoji 语言无关）')
     assert.ok(!html.includes('2026-09-28T00:00:00.000Z'), '收录日期不再裸 ISO（语言无关）')
-    assert.match(src, /kv\(lookup\("modal\.added"\), fmtDate\(it\.added\)\)/, 'added 走 fmtDate（R9 源码断言替代文案断言）')
+    assert.match(detailModalSrc, /kv\(lookup\("modal\.added"\), fmtDate\(it\.added\)\)/, 'added 走 fmtDate（R9 源码断言替代文案断言；detail-modal.jsx）')
   })
 
-  it('U9：错误重试按钮 + 空态三分支键（ZH/EN 成对）', () => {
-    assert.match(src, /lookup\("failed\.load", \{ err: error \}\)[\s\S]{0,200}lookup\("market\.retry"\)/, '错误行内联重试')
-    assert.match(src, /market\.empty\.unavailable/, 'unavailable 主文案分支')
-    assert.match(src, /market\.empty\.category/, '分类空桶文案分支')
+  it('U9：错误重试按钮 + 空态三分支键（ZH/EN 成对；MarketTab 锚随迁 market-tab.jsx——ADR-0023 T11）', () => {
+    assert.match(marketTabSrc, /lookup\("failed\.load", \{ err: error \}\)[\s\S]{0,200}lookup\("market\.retry"\)/, '错误行内联重试（market-tab.jsx）')
+    assert.match(marketTabSrc, /market\.empty\.unavailable/, 'unavailable 主文案分支（market-tab.jsx）')
+    assert.match(marketTabSrc, /market\.empty\.category/, '分类空桶文案分支（market-tab.jsx）')
     for (const k of ['market.retry', 'market.empty.category', 'market.empty.unavailable']) {
       assert.ok(new RegExp(`"${k}":`).test(i18nSrc), `键 ${k} 存在（i18n.js 词典）`)
       assert.equal(i18nSrc.split(`"${k}":`).length - 1, 2, `键 ${k} ZH/EN 各一次（i18n.js）`)
@@ -348,9 +385,9 @@ describe('0.9.45 两段加载接线（源码断言）', () => {
     const html = renderToString(h(components.__DetailModal, { it: { id: 'a', name: 'A', description: 'd', source: 'npm', npm: 'p', category: 'tools', tags: [] }, labels: {}, busy: false, onClose: () => {}, onInstall: () => {}, profileKind: 'web' }))
     assert.ok(html.includes('role="dialog"'), 'role=dialog')
     assert.ok(html.includes('aria-modal="true"'), 'aria-modal')
-    assert.match(src, /role: "dialog"/, '容器接线')
-    assert.match(src, /closeRef\.current\.focus\(\)/, '初始聚焦关闭钮')
-    assert.match(src, /role: "button", tabIndex: 0[\s\S]{0,400}onKeyDown: \(e\) => \{\s*if \(\(e\.key === "Enter" \|\| e\.key === " "\)/, 'Shot Enter/Space（含既有 role/tabIndex 锚段）')
+    assert.match(detailModalSrc, /role: "dialog"/, '容器接线（detail-modal.jsx——ADR-0023 T11）')
+    assert.match(detailModalSrc, /closeRef\.current\.focus\(\)/, '初始聚焦关闭钮（detail-modal.jsx）')
+    assert.match(chromeSrc, /role: "button", tabIndex: 0[\s\S]{0,400}onKeyDown: \(e\) => \{\s*if \(\(e\.key === "Enter" \|\| e\.key === " "\)/, 'Shot Enter/Space（含既有 role/tabIndex 锚段；Shot 迁 chrome.jsx）')
     assert.doesNotMatch(src, /focus-trap|focusTrap/, '不做焦点圈闭（Q5 边界）')
   })
 
@@ -370,8 +407,8 @@ describe('0.9.76「版本无关」徽章退役（源码断言）——展示层�
   })
   it('Modal Compat 行保留为唯一权威呈现；snapshotOf 数据字段照常透传（收藏/快照完整性）', () => {
     assert.ok(i18nSrc.includes('modal.decoupled.label') && i18nSrc.includes('modal.decoupled.value'), 'Compat 行 i18n 键在（词典面）')
-    assert.match(src, /it\.decoupled === true \? kv\(lookup\("modal\.decoupled\.label"\)/, 'Compat 行条件渲染在')
-    assert.match(src, /"verified", "audience", "decoupled"\]/, 'snapshotOf 数据字段保留')
+    assert.match(detailModalSrc, /it\.decoupled === true \? kv\(lookup\("modal\.decoupled\.label"\)/, 'Compat 行条件渲染在（detail-modal.jsx）')
+    assert.match(cardSrc, /"verified", "audience", "decoupled"\]/, 'snapshotOf 数据字段保留（card.jsx）')
   })
 })
 
@@ -381,11 +418,11 @@ describe('2026-10-13「已实测」徽章退役（B 方案）——卡面徽章�
     assert.equal(i18nSrc.includes('"badge.verified"'), false, 'i18n 徽章键不得残留（ZH/EN 均退役，词典面）')
   })
   it('byline 灰字承接（低显著度，末位=最新复验版本）；Modal「实测版本」行保留为唯一权威呈现', () => {
-    assert.match(src, /const verifiedByline = \(it\) =>/, 'byline 灰字构造器在')
-    assert.match(src, /verifiedByline\(it\),/, '市场卡 byline 接线在')
-    assert.match(src, /lookup\("byline\.verified", \{ v: it\.verified\[it\.verified\.length - 1\] \}\), title: it\.verified\.join\("、"\)/, '灰字取末位（时间序最新）+ tooltip 全量清单')
+    assert.match(cardSrc, /const verifiedByline = \(it\) =>/, 'byline 灰字构造器在（card.jsx）')
+    assert.match(marketTabSrc, /verifiedByline\(it\),/, '市场卡 byline 接线在（market-tab.jsx——ADR-0023 T11）')
+    assert.match(cardSrc, /lookup\("byline\.verified", \{ v: it\.verified\[it\.verified\.length - 1\] \}\), title: it\.verified\.join\("、"\)/, '灰字取末位（时间序最新）+ tooltip 全量清单（card.jsx）')
     assert.equal(i18nSrc.split('"byline.verified":').length - 1, 2, 'byline.verified ZH/EN 各一次（键定义计口径，带冒号，i18n.js）')
-    assert.match(src, /it\.community !== true && Array\.isArray\(it\.verified\) && it\.verified\.length \? kv\(lookup\("modal\.verified"\)/, 'Modal「实测版本」行条件渲染在（唯一权威呈现）')
+    assert.match(detailModalSrc, /it\.community !== true && Array\.isArray\(it\.verified\) && it\.verified\.length \? kv\(lookup\("modal\.verified"\)/, 'Modal「实测版本」行条件渲染在（唯一权威呈现；detail-modal.jsx）')
   })
 })
 
@@ -393,15 +430,16 @@ describe('0.9.76 分类行吸顶高频跳动修复（源码断言）——滚动
   it('.dshm-body 关闭 overflow-anchor（断自激循环驱动器）；吸顶/哨兵几何不动', () => {
     assert.match(stylesSrc, /\.dshm-body\{[^}]*overflow-anchor:none/, '滚动锚定停用在位（.dshm-body 是面板唯一滚动容器）')
     assert.ok(stylesSrc.includes('position:sticky;top:-14px'), '吸顶几何不变（哨兵契约依赖 top:-14px）')
-    assert.ok(src.includes('top: "-5px"'), '哨兵 -5px 契约不变（JSX 面）')
+    assert.ok(zoneChipsSrc.includes('top: "-5px"'), '哨兵 -5px 契约不变（JSX 面，zone-chips.jsx）')
   })
 })
 
 describe('0.9.85 头部自升级入本地操作泵（源码断言）——主人真机反馈：自升级在操作日志无记录', () => {
   it('DshmVersionChip 走 ops.runOp（kind upgrade/target dsh-m + opMeta from/to 落账）且 ops 接线到头部', () => {
-    assert.match(src, /ops\.runOp\("upgrade", "dsh-m", async \(\) => \{\s*const r = await api\("self-upgrade"\);/, '自升级入泵（目标=自身包名，与 marketplace upgrade 锚 it.installedPkg 区分）')
-    assert.match(src, /opMeta: \{ from: version, to: r\.version \|\| "latest" \}/, 'from/to 版本变迁落账（opRowVm 渲染 vX→vY 的数据源）')
-    assert.ok(src.includes('h(DshmVersionChip, { version: pluginVersion, notify, ops })'), 'ops 接线头部 chip 在（SSR/探针无 ops 时回退直连 api）')
+    const versionChipSrc = readFileSync(join(root, 'src/client/version-chip.jsx'), 'utf8')
+    assert.match(versionChipSrc, /ops\.runOp\("upgrade", "dsh-m", async \(\) => \{\s*const r = await api\("self-upgrade"\);/, '自升级入泵（目标=自身包名，与 marketplace upgrade 锚 it.installedPkg 区分；chip 迁 version-chip.jsx）')
+    assert.match(versionChipSrc, /opMeta: \{ from: version, to: r\.version \|\| "latest" \}/, 'from/to 版本变迁落账（opRowVm 渲染 vX→vY 的数据源）')
+    assert.ok(src.includes('h(DshmVersionChip, { version: pluginVersion, notify, ops })'), 'ops 接线头部 chip 在（head 渲染，main.jsx 保留区；SSR/探针无 ops 时回退直连 api）')
   })
 })
 
@@ -456,12 +494,12 @@ describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结�
     assert.ok(stylesSrc.includes('@media (max-width:600px){.dshm-overlay{padding:8px}}'), '视口 600 overlay 断点不动')
   })
 
-  it('详情弹窗：✕ 与「安装」双端常驻（modalbody 结构化滚动）', () => {
-    assert.ok(src.includes('className: "dsvm-modalbody"'), 'body 包裹层在')
+  it('详情弹窗：✕ 与「安装」双端常驻（modalbody 结构化滚动；切片随迁 detail-modal.jsx——ADR-0023 T11）', () => {
+    assert.ok(detailModalSrc.includes('className: "dsvm-modalbody"'), 'body 包裹层在（detail-modal.jsx）')
     assert.match(stylesSrc, /\.dsvm-modalbox\{[^}]*overflow:hidden/, 'box 攂滚动改 hidden')
     assert.ok(!/\.dsvm-modalbox\{[^}]*overflow:auto/.test(stylesSrc), 'box 不再整体滚动')
     assert.match(stylesSrc, /\.dsvm-modalbody\{overflow:auto;min-height:0;overscroll-behavior:contain/, 'body 滚动 + min-height:0 + 防链式在')
-    const m = src.slice(src.indexOf('function DetailModal('), src.indexOf('// ---------- 市场页'))
+    const m = detailModalSrc.slice(detailModalSrc.indexOf('function DetailModal('))
     assert.ok(m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-kv') && m.indexOf('dsvm-modalbody') < m.indexOf('dsvm-modalactions'), 'body 包住 kv 到 actions 之前的中段')
   })
 
@@ -470,5 +508,33 @@ describe('T7 验收三修（源锚）——头部 720 断点 / 弹窗 body 结�
     assert.ok(stylesSrc.includes('.dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '三列规则在（容器版，4:7:4）')
     assert.ok(!stylesSrc.includes('.dshm-panel.full .dshm-settings-grid{grid-template-columns:4fr 7fr 4fr}'), '.full 三列规则已退役')
     assert.ok(stylesSrc.includes('@media (max-width:760px){.dshm-settings-grid'), '≤760 视口单列保留')
+  })
+})
+
+// ---------- ADR-0023 T12：出仓组件 props 变体扩面（每组件 1-2 代表态，SSR 首渲染语义，不穷举） ----------
+describe('ADR-0023 T12 扩面：MarketTab / OperationsCard 代表性 props 变体', () => {
+  const mkQuery = () => ({ zone: 'community', source: 'community', query: '', category: null, sort: { field: 'downloads', dir: 'desc' }, offset: 0, limit: 32 })
+  const emptyMarket = (loading) => ({ data: null, loading, error: null, reload: () => {}, query: mkQuery(), updateQuery: () => {} })
+  const normalized = (items, total) => ({ items, total, offset: 0, limit: 32, categoryCounts: {}, registryState: { count: 0 }, community: { enabled: false, status: 'disabled', version: null, checkedAt: null, fetchedAt: null, acceptedCount: 0, displaced: 0, categoryLabels: {}, categoryLabelsEn: {} }, installedComplete: true, latestComplete: true, latestTimedOut: false })
+  it('MarketTab loading 骨架态与有数据态首渲染不抛（分区壳 + 卡片网格路径）', () => {
+    const markets = { community: emptyMarket(true), primary: emptyMarket(true) }
+    const loading = renderToString(h(components.__MarketTab, { notify: () => {}, markets, onMutation: null, ops: { records: [], runOp: async () => {} }, favorites: null, profileKind: 'web', onOpenOps: () => {} }))
+    assert.ok(typeof loading === 'string' && loading.length > 0, 'loading 态渲染出非空 HTML')
+    const item = { id: 'x', name: 'X', description: 'd', source: 'npm', npm: 'pkg-x', category: 'tools', tags: [], latest: '1.0.0' }
+    const loaded = renderToString(h(components.__MarketTab, {
+      notify: () => {},
+      markets: { community: { ...emptyMarket(false), data: normalized([item], 1) }, primary: emptyMarket(false) },
+      onMutation: null, ops: { records: [], runOp: async () => {} }, favorites: { list: [], toggle: () => {}, removeIds: () => {} }, profileKind: 'web', onOpenOps: () => {},
+    }))
+    assert.ok(loaded.includes('pkg-x') || loaded.includes('X'), '有数据态卡片渲染在')
+  })
+  it('OperationsCard 有记录态首渲染不抛（进行中组 + 已结束组 + 滚动区路径）', () => {
+    const records = [
+      { id: 'r1', kind: 'install', target: 'pkg-a', status: 'running', meta: { npm: 'pkg-a', session: true }, updatedAt: 1 },
+      { id: 'r2', kind: 'upgrade', target: 'pkg-b', status: 'done', meta: { toVersion: '2.0.0' }, updatedAt: 2 },
+      { id: 'r3', kind: 'toggle', target: 'pkg-c', status: 'failed', error: 'boom', updatedAt: 3 },
+    ]
+    const html = renderToString(h(components.__OperationsCard, { records, onClearFinished: () => {}, onRemove: () => {} }))
+    assert.ok(typeof html === 'string' && html.includes('dsvm-oprow'), '记录行渲染在')
   })
 })
