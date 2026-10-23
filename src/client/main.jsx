@@ -36,7 +36,7 @@ const { shouldShowInstallCmd } = require("./install-cmd.js");
 const { createOpOutcome } = require("./op-outcome.js");
 
 // ---------- i18n（ADR-0023 第一刀：词典与取值函数出仓 src/client/i18n.js，main.jsx 仅保留装配） ----------
-const { lookup, browserLang, communityLabels } = require("./i18n.js");
+const { lookup, browserLang, communityLabels, ZH, EN } = require("./i18n.js");
 // 变更结局描述（GLOSSARY，0.9.94）：五类变更结局投影的成品文案装配单源；lookup 纯函数（字典静态），模块级实例化
 const oc = createOpOutcome(lookup);
 
