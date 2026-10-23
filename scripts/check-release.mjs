@@ -64,6 +64,26 @@ try {
   check('发布物清单断言', false, String(err?.message ?? err))
 }
 
+// 0.10.9 retro C2（评审 O-3/O-5 两轮实证）：CHANGELOG 顶部条目的测试计数会随增测试静默过期——
+// 门禁化：中文顶条含「全量 N/N」时对实测通过数断言（门禁内实跑一遍 npm test，~100s；pack 步
+// 的 prepare 已完成构建，此处不重复 build）。
+try {
+  const zhIdx = lines.indexOf('## 中文')
+  const zhBodyEnd = lines.findIndex((l, i) => i > zhIdx && l.startsWith('### ') && i > lines.indexOf(zhTop))
+  const zhBody = lines.slice(lines.indexOf(zhTop), zhBodyEnd === -1 ? undefined : zhBodyEnd).join('\n')
+  const claimed = zhBody.match(/全量 (\d+)\/\1/)
+  if (!claimed) {
+    check('CHANGELOG 测试计数新鲜度', true, '中文顶条无「全量 N/N」主张——跳过')
+  } else {
+    const want = Number(claimed[1])
+    const testOut = execSync('node --test tests/*.test.mjs', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    const got = Number((testOut.match(/^ℹ pass (\d+)$/m) || [])[1] ?? NaN)
+    check(`CHANGELOG 计数新鲜度（主张 ${want} = 实测 ${got}）`, got === want, got === want ? '' : '实测与主张不符——先回写 CHANGELOG 再发版')
+  }
+} catch (err) {
+  check('CHANGELOG 测试计数新鲜度', false, String(err?.message ?? err))
+}
+
 if (fails.length > 0) {
   console.error(`\n发版门禁未过（${fails.length} 项）：${fails.join('；')}`)
   process.exit(1)
