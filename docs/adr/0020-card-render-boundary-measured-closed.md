@@ -29,7 +29,7 @@
 
 ## Consequences
 
-- **重开触发条件**（未来评审命中才重开，不命中不重提）：① 单卡渲染成本显著上升（徽章逻辑 / 图片链 / 卡片结构加重）；② `MARKET_PAGE_SIZES` 上限上调；③ 探针复测任一常规场景 > 65ms 或出现 longtask ≥ 1；④ 真实用户渲染卡顿反馈。重开时首选形态 = MarketTab 级边界 + props 稳定化（非 per-card）。
+- **重开触发条件**（未来评审命中才重开，不命中不重提）：① 单卡渲染成本显著上升（徽章逻辑 / 图片链 / 卡片结构加重）；② `MARKET_PAGE_SIZES` 上限上调；③ 探针复测任一常规场景 > 65ms 或出现 longtask ≥ 1（**已由 2026-10-23 增补节修订为相对增量判据 → 见文末增补节**，评审 O-9）；④ 真实用户渲染卡顿反馈。重开时首选形态 = MarketTab 级边界 + props 稳定化（非 per-card）。
 - **复测方法**：`node scripts/probe-render-count.mjs`（手动运行不进 CI，verify-panel-mobile 同款惯例；产物 `node_modules/.dshm/render-probe/results.json`；插桩锚点漂移会显式报错而非静默测错）。
 - **测量诚实性边界**：本机为服务器级 x86（headless Chromium），慢机器按比例放大——最大场景 37ms 对 65ms 感知线余量约 1.8×；dev UMD 参考数字约 2×（88–130ms），仅作最坏上界。
 - **发布形态**：随 0.9.87+ 顺带入库（探针 + 本 ADR 均为开发工具/文档，无运行时行为变化）。
