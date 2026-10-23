@@ -8,6 +8,14 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.9 重构：客户端壳层组件缝三刀战役（ADR-0023）——main.jsx 4475→1164 行，零行为变化
+
+- **需求（2026-10-22 架构评审钢人裁决 + 2026-10-23 grill 共识 19 项、独立评审 16 题）**：main.jsx 单文件巨石（4475 行、近月 113 次触碰）的测试面是「grep 源文本」（18 个测试文件读源码、11+ 源码断言 describe），对账横幅单一主题四轮修复每轮同改 3-5 区——「接口=源文本」是浅接口的制度化代价。
+- **方案（三刀，ADR-0023，单版合并）**：① i18n 词典与 CSS 出仓 `i18n.js`/`styles.js`（ESM 具名导出，纯搬家）；② `panel-ops.js` 深模块化——泵上下文显式 bind/unbind 取代模块级可变单例、`planReconcileActions` 纯计划函数（先算后写延伸到编排层）、`restartBannerDecision` 五站点判定单源（委派 toggleNoticeKeys/upgradeNotify 不重复实现）、refreshViews 死字段删除；③ 组件出仓 11 个 .jsx + `hooks.js`（api/useMarketData/useScrollableContain 等），main.jsx 降级为组合根（MarketPanel+挂载+apply+tool views，1164 行）。
+- **源锚政策（三桶）**：「有缝即接口测试，源锚只留给无缝可走的物理事实」——195 条锚逐条迁移（附录时序绑定表：内容与锚同任务同 commit）；切片锚退役改单文件全文锚、跨文件计数改多文件合计（mutationFailed 消费面目录级、degraded 双 Tab 合计）、负向键锚词典面/调用面双扫；i18n 审计调用侧扩至全部组件文件；render-smoke 拼接导出 hack 退役（仅剩 MarketPanel）+ 组件直连双入口 + props 变体扩面。
+- **验证**：全量 1668/1668 绿（基线 1645 + panel-ops 直测 11 + T12 扩面 2）；渲染探针多源化复测全场景 **零 longtask**、数字与 ADR-0020 基线同量级（最大 60.7ms < 65ms 感知线）——拆分零渲染回归；三连自证（opsPumpCtx 归零 / onMutation: refreshViews 恰 2 / 泵创建迁出）+ 各刀搬家自证全过。执行中发现并修复两颗 SSR 盲区雷（OP_STATUS_CLS/PHASE_LABEL 自由变量 + dsvmModalDepth 声明丢失，均由探针/浏览器路径抓获——「首渲染天花板」的活例证）。
+- **规范落地**：GLOSSARY 增「面板操作接线（Panel Ops Wiring）」词条；CODING-STANDARDS「客户端状态机约定」改写（panel-ops 先例 + 组件可 require + 三桶政策 + 无 jsdom 纪律）；ADR-0020 探针锚点随拆分多源化。实施计划（含 195 锚逐锚去向表）：`docs/plans/2026-10-23-client-shell-seams-implementation-plan.md`。
+
 ### 0.10.8 修复：开关读路径同包多行误报「已停用」（skip-browser-auth 双代门控撞首行匹配）
 
 - **需求（2026-10-19，主人）**：官方插件页 `@iasiv5/dsh-skip-browser-auth` 开关 ON，dsh-m 已装面板却显示「已停用」——账实分离（无 token `GET /` 200 + journal `BrowserAuth has been skipped` 横幅证明插件真在跑，dsh-m 读数是错的）。
@@ -717,6 +725,14 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Refactor in 0.10.9 — client shell component-seam campaign (ADR-0023): main.jsx 4475→1164 lines, zero behavior change
+
+- **Need (2026-10-22 steelman architecture ruling + 2026-10-23 grill consensus of 19 decisions, independent review of 16 findings)**: the main.jsx monolith (4,475 lines, 113 touches in the past month) had "grep the source text" as its test surface (18 test files reading the source, 11+ source-assertion describes); the reconciliation-banner theme alone took four fix rounds, each touching 3-5 scattered regions — "the interface is the source text" was the institutionalized cost of a shallow interface.
+- **Approach (three knives, ADR-0023, merged into one release)**: ① i18n dictionaries and CSS extracted to `i18n.js`/`styles.js` (ESM named exports, pure moves); ② `panel-ops.js` deep module — explicit bind/unbind replaces the module-level mutable pump-context singleton, `planReconcileActions` pure planning function (compute-then-write extended to the orchestration layer), `restartBannerDecision` single source for all five banner sites (delegating to toggleNoticeKeys/upgradeNotify instead of reimplementing), refreshViews dead field removed; ③ eleven .jsx component files + `hooks.js` (api/useMarketData/useScrollableContain etc.), main.jsx reduced to a composition root (MarketPanel + mount + apply + tool views, 1,164 lines).
+- **Source-anchor policy (three buckets)**: "wherever a seam exists, test through the interface; source anchors remain only for physical facts with no seam" — all 195 anchors migrated per-row (appendix timing-binding table: content and its anchors move in the same task/commit); slice anchors retired into single-file full-text anchors, cross-file counts became multi-file aggregates (mutationFailed consumer-set directory level, degraded dual-tab aggregate), negative key anchors scan dictionary side and call side; the i18n audit's caller side extended to every component file; the render-smoke copy-and-append-export hack retired (only MarketPanel remains) with a dual direct-require entry plus props-variant expansion.
+- **Verification**: full suite 1668/1668 green (baseline 1645 + 11 panel-ops direct tests + 2 T12 variants); the multi-sourced render probe re-run shows **zero long tasks** across all scenarios with numbers in the same band as the ADR-0020 baseline (max 60.7ms < the 65ms perception line) — the split has zero render regression; triple self-checks (opsPumpCtx gone / onMutation: refreshViews exactly 2 / pump creation moved) plus per-knife move self-checks all pass. Two SSR-blind-spot landmines found and fixed during execution (OP_STATUS_CLS/PHASE_LABEL free variables and a lost dsvmModalDepth declaration, both caught via the probe/browser path — a live demonstration of the "first-render ceiling").
+- **Governance**: GLOSSARY gains the "Panel Ops Wiring" term; CODING-STANDARDS "客户端状态机约定" rewritten (panel-ops precedent + components importable by tests + three-bucket policy + no-jsdom discipline); ADR-0020 probe anchors multi-sourced alongside the split. Implementation plan (with the 195-row anchor disposition table): `docs/plans/2026-10-23-client-shell-seams-implementation-plan.md`.
 
 ### Fix in 0.10.8 — enablement read path misreports multi-entry packages as disabled (skip-browser-auth dual-generation gating hits first-match)
 
