@@ -93,7 +93,7 @@ describe('autoExpandDecision（自动展开四态决策，评审 R1-Q3）', () =
     assert.deepEqual(autoExpandDecision(50, CLIP, false, false), { record: true, expand: true })
     assert.deepEqual(autoExpandDecision(78, CLIP, false, false), { record: true, expand: true })
   })
-  it('越界 + 未记录 + 展开态 → 仅记录不施裁剪（record-only，现状 main.jsx:921-922 展开态也写 autoRef）', () => {
+  it('越界 + 未记录 + 展开态 → 仅记录不施裁剪（record-only；展开态也写 autoRef——接线现居 zone-chips.jsx，ADR-0023 T10 顺手勘正旧 main.jsx 行号引用）', () => {
     assert.deepEqual(autoExpandDecision(50, CLIP, false, true), { record: true, expand: false })
   })
   it('越界 + 已记录（autoRef 命中）→ 不弹回（⌃ 手动收起后尊重）', () => {
