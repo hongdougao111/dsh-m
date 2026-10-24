@@ -10,7 +10,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { listMarket, listInstalledWithMeta, existingMarketIds } from '../lib/core/market.js'
-import { installFromRegistry, upgradePlugin, uninstallPlugin, capturePreMutationState, derivePrior } from '../lib/core/market-mutation.js'
 import { communityOutcome } from '../lib/core/merged-market.js'
 import { IncompatibleError } from '../lib/core/compat-check.js'
 import { latestCacheKey, readLatestCache, writeLatestCache, resetLatestCacheForTest } from '../lib/core/latest-cache.js'
