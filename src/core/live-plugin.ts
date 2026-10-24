@@ -6,7 +6,12 @@
 export interface LoaderEntry {
   /** 合成条目 id（cordis.patch.yml 覆盖行的匹配键，官方 pluginEntryId 同源） */
   id?: string
-  options?: { name?: string; disabled?: boolean | null }
+  /**
+   * options.id 也是合成条目 id 的在位投影——官方 themes.ts `ownsLoaderEntry` 读
+   * `entry.options.id` 做条目归属判定（载体包认领，#156/#619 同源）；顶层 id 是
+   * dsh-m 0.4.0 行开关读法。两处形态在宿主对象上并存与否随代际浮动，读方双查。
+   */
+  options?: { name?: string; id?: string; disabled?: boolean | null }
   /**
    * entry 顶层的有效停用态（含被禁用的祖先组）——官方 readPluginInventory 的
    * `enabled = !entry.disabled` 读法（dsh-host-plugin-inventory L131）。与

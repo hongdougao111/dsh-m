@@ -8,6 +8,8 @@
  * 观察量口径（官方 readPluginInventory 同款，多行聚合）：
  * - enabled = 同包全部 loader entry 中任一行 !entry.disabled（skip-browser-auth 0.4.x
  *   起同包双代门控行：休眠行 disabled:true + 活性行并存，任一启用即整包启用）；
+ * - 「同包 entry」按官方 ownsLoaderEntry 归属口径认领（name 精确/真子路径 + 载体
+ *   insert id 认领，见 findLoaderEntries 注；issue #2，官方 #156 同口径）；
  * - phase = 首个启用行的 fiber.state 数字枚举投影（0 pending / 1 loading / 2 active /
  *   3 failed / 4 disposed→null / 5 unloading；fiber 不存在即 null）；
  * - CLI 无 loader 形态：enabled 从「在 bundles 且其补丁行无 disabled 覆盖」推断，
@@ -81,11 +83,42 @@ function mapPhase(fiber: LoaderEntry['fiber']): LivePhase {
   return FIBER_PHASE[state] ?? null
 }
 
-/** 按模块名收集插件的全部非 group 条目（同包可有多行：skip-browser-auth 0.4.x 双代门控行）。 */
-function findLoaderEntries(entries: Iterable<LoaderEntry>, pkg: string): LoaderEntry[] {
+/**
+ * 条目归属两规则（issue #2；官方 dshmarket themes.ts ownsLoaderEntry / verify.ts
+ * carriedRowLive #156 同口径）：
+ * 1. name 精确或「pkg/」真子路径（`dsh-ops/shell` 归 `dsh-ops`；斜杠边界防
+ *    `@scope/pkg2` 被 `@scope/pkg` 误吞）；
+ * 2. name 无关的载体条目（carrier bundle：包自身不挂插件、patch 插入的是别的
+ *    模块，如 dsh-complex-project-preset 挂 @deepseek-ai/dsh-agent-preset）——
+ *    条目 id 出自本包 patch 插入行，唯一属于本包，按裸 id（剥 include:<key>:<id>
+ *    前缀）比对 insert id 集合认领。
+ */
+function nameMatchesPackage(name: string | undefined, pkg: string): boolean {
+  return name !== undefined && (name === pkg || name.startsWith(`${pkg}/`))
+}
+
+/** loader 条目 id 双投影：顶层 id（dsh-m 行开关读法）或 options.id（官方读法），取先到非空者。 */
+function loaderEntryId(entry: LoaderEntry): string | null {
+  if (typeof entry.id === 'string' && entry.id !== '') return entry.id
+  const optionId = entry.options?.id
+  return typeof optionId === 'string' && optionId !== '' ? optionId : null
+}
+
+/** loader id 可能带 include 前缀（include:<key>:<id>）；裸 id 才是补丁行声明的形态（官方同注）。 */
+function bareEntryId(id: string): string {
+  return id.split(':').pop() ?? id
+}
+
+/** 按官方 ownsLoaderEntry 归属口径收集插件的全部条目（同包可有多行：双代门控/多子路径/多载体行）。 */
+function findLoaderEntries(entries: Iterable<LoaderEntry>, pkg: string, ownedIds: ReadonlySet<string>): LoaderEntry[] {
   const found: LoaderEntry[] = []
   for (const entry of entries) {
-    if (entry && entry.options?.name === pkg) found.push(entry)
+    if (!entry) continue
+    if (nameMatchesPackage(entry.options?.name, pkg)) found.push(entry)
+    else {
+      const id = loaderEntryId(entry)
+      if (id !== null && ownedIds.has(bareEntryId(id))) found.push(entry)
+    }
   }
   return found
 }
@@ -101,10 +134,12 @@ export function composeEnablement(input: ComposeEnablementInput): Map<string, Pl
   const overrideIndex = new Map(profileOverrides.map((row) => [row.id, row.disabled]))
   for (const item of items) {
     const pkg = item.pkg
-    const matches = loaderEntries !== null ? findLoaderEntries(loaderEntries, pkg) : []
+    const rowIds = item.patchRows?.inserts.map((row) => row.id) ?? []
+    // 本包 patch 声明的 insert id 集合 = 载体条目认领凭据（官方 carriedRowLive 同源）
+    const ownedIds = new Set(rowIds)
+    const matches = loaderEntries !== null ? findLoaderEntries(loaderEntries, pkg, ownedIds) : []
     const entry = matches[0] ?? null
     const inBundles = bundles.includes(pkg)
-    const rowIds = item.patchRows?.inserts.map((row) => row.id) ?? []
 
     let enabled: boolean
     let phase: LivePhase = null

@@ -6,7 +6,9 @@
  * - 保护名单：'dsh-m' → lockReason:'self'；官方 16 项 → 'protected'；均 toggleable:false；
  * - no-entry：loader 无 entry 且不在 bundles → toggleable:false（未装载不是被关）；
  * - CLI 无 loader：phase null、enabled 从「在 bundles 且行无 disabled 覆盖」推断；
- * - patchRows 不可读（含文件缺失）→ 判 bundle。
+ * - patchRows 不可读（含文件缺失）→ 判 bundle；
+ * - 载体/子路径条目认领（issue #2，官方 dshmarket carriedRowLive/ownsLoaderEntry 同口径）：
+ *   name 精确或真子路径；name 无关时按本包 insert id 认领（剥 include 前缀，id 双投影）。
  * 运行：npm run build && node --test tests/enablement.test.mjs tests/installed.test.mjs
  */
 import { describe, it } from 'node:test'
@@ -281,5 +283,132 @@ describe('composeEnablement：CLI 无 loader 形态', () => {
     })
     assert.deepEqual(rows.get('lib-only-pkg').lockReason, 'no-entry')
     assert.equal(rows.get('lib-only-pkg').enabled, false)
+  })
+})
+
+describe('composeEnablement：载体/子路径条目认领（issue #2，官方 carriedRowLive/ownsLoaderEntry 同口径）', () => {
+  /** 载体包 fixture：insert 行 name 挂别的模块（loader 里无同名条目），id 是本包唯一归属凭据。 */
+  function carrierItem(pkg, inserts) {
+    return item(pkg, { inserts, configRows: 0, readable: true })
+  }
+
+  /**
+   * 载体条目 fixture：name 与包名无关；id 投影可选——
+   * `idAt:'top'`（dsh-m 行开关读法，live-plugin.ts）或 `'options'`（官方 themes.ts 读法），缺省 options。
+   */
+  function carrierEntry(name, { id, disabled = false, state, idAt = 'options' } = {}) {
+    const row = { options: { name }, disabled }
+    if (idAt === 'top') row.id = id
+    else row.options.id = id
+    if (state !== undefined) row.fiber = { state }
+    return row
+  }
+
+  it('载体包（dsh-complex-project-preset 形态）：条目名挂 @deepseek-ai/dsh-agent-preset、无同名条目 → 按 insert id 认领为启用', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('dsh-complex-project-preset', [
+        { id: 'complex-preset-agent', name: '@deepseek-ai/dsh-agent-preset' },
+      ])],
+      loaderEntries: [carrierEntry('@deepseek-ai/dsh-agent-preset', { id: 'complex-preset-agent', state: 2 })],
+      bundles: ['dsh-complex-project-preset'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('dsh-complex-project-preset').enabled, true)
+    assert.equal(rows.get('dsh-complex-project-preset').phase, 'active')
+  })
+
+  it('载体行休眠：id 认领的行 disabled:true → enabled:false（不是所有 id 命中都算启用）', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('carrier-pkg', [{ id: 'carrier-row', name: 'other-module' }])],
+      loaderEntries: [carrierEntry('other-module', { id: 'carrier-row', disabled: true })],
+      bundles: ['carrier-pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('carrier-pkg').enabled, false)
+  })
+
+  it('邻居防呆：别的包挂的条目（id 不在本包 insert 集合、名字无关）→ 不得认领', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('carrier-pkg', [{ id: 'my-row', name: 'my-module' }])],
+      loaderEntries: [carrierEntry('other-module', { id: 'neighbour-row', state: 2 })],
+      bundles: ['carrier-pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('carrier-pkg').enabled, false)
+  })
+
+  it('include 前缀：loader id 带 include:<key>:<id> → 剥前缀按裸 id 认领（官方 themes.ts 同注）', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('carrier-pkg', [{ id: 'carrier-mounted-b', name: 'dshm-e2e-fixture-b' }])],
+      loaderEntries: [carrierEntry('dshm-e2e-fixture-b', { id: 'include:some-key:carrier-mounted-b', state: 2 })],
+      bundles: ['carrier-pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('carrier-pkg').enabled, true)
+  })
+
+  it('id 双投影：顶层 id（dsh-m 行开关读法）与 options.id（官方读法）任一命中即认领', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('dual-projection-pkg', [
+        { id: 'row-top', name: 'module-top' },
+        { id: 'row-options', name: 'module-options' },
+      ])],
+      loaderEntries: [
+        carrierEntry('module-top', { id: 'row-top', state: 2, idAt: 'top' }),
+        carrierEntry('module-options', { id: 'row-options', state: 2, idAt: 'options' }),
+      ],
+      bundles: ['dual-projection-pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('dual-projection-pkg').enabled, true)
+  })
+
+  it('子路径条目（dsh-ops 形态）：name 为「包名/子路径」→ 归属本包，聚合启用', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('dsh-ops', [
+        { id: 'ops-shell', name: 'dsh-ops/shell' },
+        { id: 'ops-file', name: 'dsh-ops/file' },
+      ])],
+      loaderEntries: [
+        carrierEntry('dsh-ops/shell', { id: 'ops-shell', state: 2 }),
+        carrierEntry('dsh-ops/file', { id: 'ops-file', disabled: true }),
+      ],
+      bundles: ['dsh-ops'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('dsh-ops').enabled, true)
+    assert.equal(rows.get('dsh-ops').phase, 'active')
+  })
+
+  it('子路径边界：@scope/pkg2/sub 不得被 @scope/pkg 吞掉（斜杠边界，官方 nameMatchesPackage 同界）', () => {
+    const rows = composeEnablement({
+      items: [item('@scope/pkg', UNREADABLE)],
+      loaderEntries: [carrierEntry('@scope/pkg2/sub', { id: 'neighbour-sub', state: 2 })],
+      bundles: ['@scope/pkg'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('@scope/pkg').enabled, false)
+  })
+
+  it('普通包回归：同名条目仍按名字认领（dsh-todo-board 形态，issue 六项回归表）', () => {
+    const rows = composeEnablement({
+      items: [item('dsh-todo-board', SINGLE)],
+      loaderEntries: [entry('dsh-todo-board', { state: 2 })],
+      bundles: ['dsh-todo-board'],
+      profileOverrides: [],
+    })
+    assert.equal(rows.get('dsh-todo-board').enabled, true)
+  })
+
+  it('loader 无本包任何条目（载体行未装载）→ enabled:false、toggleable 不变（有补丁层非 no-entry）', () => {
+    const rows = composeEnablement({
+      items: [carrierItem('ghost-carrier', [{ id: 'ghost-row', name: 'ghost-module' }])],
+      loaderEntries: [carrierEntry('unrelated-pkg-row', { id: 'unrelated-row', state: 2 })],
+      bundles: ['ghost-carrier'],
+      profileOverrides: [],
+    })
+    const row = rows.get('ghost-carrier')
+    assert.equal(row.enabled, false)
+    assert.equal(row.toggleable, true)
   })
 })
