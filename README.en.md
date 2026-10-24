@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-m?label=npm)](https://www.npmjs.com/package/dsh-m)
 [![Registry Check](https://img.shields.io/github/actions/workflow/status/iasiv5/dsh-m/registry.yml?branch=main&label=Registry%20Check)](https://github.com/iasiv5/dsh-m/actions/workflows/registry.yml)
 [![License](https://img.shields.io/github/license/iasiv5/dsh-m?label=License)](./LICENSE)
-[![DSH Web](https://img.shields.io/badge/DSH%20Web-0.1.2--rc.1%20%E2%86%92%200.2.1--rc.2-2563eb)](#compatibility--faq)
+[![DSH Web](https://img.shields.io/badge/DSH%20Web-0.1.2--rc.1%20%E2%86%92%200.2.1--rc.3-2563eb)](#compatibility--faq)
 
 English · [中文](./README.md)
 
@@ -80,6 +80,7 @@ The GUI and Agent tools manage the **current host profile** (Web or Desktop). Th
 | `0.1.7-rc.1 / rc.2` | `.volatile()` + `settings.update` | Checked |
 | `0.2.0-rc.1 / rc.2` | Same as 0.1.7 | rc.2 and restart path live-tested |
 | `0.2.1-rc.2` | Same as 0.2.0 | Install/upgrade and D3 self-upgrade dogfooded (0.10.x line) |
+| `0.2.1-rc.3` | Same as 0.2.0 | 0.10.11 fix line link-installed live test: 1719/1719 tests green + seven-item compatibility checklist |
 
 **Is Desktop identical to Web?** No. Desktop browsing, new-package installation, and toggles act on the desktop profile. Upgrades and uninstalls require capabilities from the official host `pluginManager`; if absent, dsh-m returns a structured refusal and guidance. Desktop uses the official app lifecycle rather than Web's one-click restart; quit and reopen as instructed. Favorites, operations, and installed states are separate between profiles.
 

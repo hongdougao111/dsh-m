@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.11 修复：社区 issue 四连——载体误报停用 / 桌面判型拒绝 / 核心包遮蔽 / codex-ui 入口消失（#2/#3+#6/#7/#4）
+
+- **需求（2026-10-20 起 GitHub 社区五份报告）**：①已装列表把载体型插件（dsh-ops、dsh-complex-project-preset）误报「已停用」，插件实际在跑（#2）；②桌面发行版 profile 名非 `desktop`（dsh-tauri 叫 `tauri`、dataelement/dsh-desktop 就叫 `web`）时写操作被拒或走错路径撞装后守卫（#3/#6 同根因）；③dependencies 携带 @deepseek-ai/dsh-atomic-write 被 profile pnpm 提升遮蔽应用自带核心包，官方 health 判危、启动壳拦重启（#7）；④启用 dsh-codex-ui 后插件市场入口消失（#4）。
+- **根因与修法**：①条目认领只认「名 == 包名」——镜像官方 dshmarket ownsLoaderEntry/carriedRowLive 口径：name 精确或真子路径 + name 无关时按本包 patch insert id 认领（剥 include 前缀、顶层/options id 双投影）；②`kindOf()` 按名字枚举宿主形态必然漏——`tauri` 并入桌面名集，host 来源 profile 叠加 generation 投影事实探测（node_modules 符号链接指向 .generations 或 lockfile link: 证据 ⇒ 按 desktop 委派官方管理器；fallback 旧宿主不探测零漂移；明确不用「pluginManager 存在性」判桌面——官方 Web 同样提供该服务），derivePrior/verifyNpmCommitState 认投影（代际目录自身可回退，不依赖 lock integrity），WRITE_GUIDANCE 空串与 guard.noforce 悬空文案补可操作出口；③dsh-atomic-write 按报告方案 2 vendor 进 `core/atomic-write.ts`（MIT，锁协议逐字保真），dependencies 摘除 + 依赖卫生守卫测试；④壳接管哨兵分档（shell-takeover.js）：合作换壳（页脚自己渲染 footer.action 槽，名单含 codex-ui NS）照常在场，敌意换壳（ds-bot 档）维持让位。
+- **验证**：typecheck 零错误；锚定 SHA（9b80477）在 DSH 0.2.1-rc.3 web 实机（link 装机）测试 1719/1719 零失败，七项兼容清单（判型不误伤/写路径五步/已装对账/锁与原子写/面板入口/CLI/doctor 零判危）全部通过；Windows 基线对照 17 失败逐名一致（本机环境既有，028 清单族）。发版说明：#3/#6/#7 需升级到本版生效；dataelement 全新空 profile（尚无投影证据可探）首装仍走 web 路径。
+
 ### 0.10.10 修复：侧栏双语标签注册静默失效（locale.register 引用出仓后未定义）
 
 - **症状**：0.10.9 起，侧栏 dsh-m 入口的 locale 字典注册静默失败——`main.jsx` 内 `locale.register("dshm", { zh: ZH, en: EN })` 在 i18n 词典出仓（ADR-0023 第一刀 T1）后引用未声明标识符，`try/catch` 吞掉 ReferenceError；中文界面无感，英文界面侧栏标签回退默认文案。
@@ -732,6 +738,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fix in 0.10.11 — community issue batch: carrier false-disabled / desktop kind rejection / core-package shadowing / codex-ui entry missing (#2/#3+#6/#7/#4)
+
+- **Need (five GitHub community reports since 2026-10-20)**: ① the Installed list falsely reported carrier-bundle plugins (dsh-ops, dsh-complex-project-preset) as disabled while they were running (#2); ② on desktop distros whose profile is not named `desktop` (dsh-tauri uses `tauri`, dataelement/dsh-desktop uses `web`), write operations were refused or took the wrong path into the install guard (#3/#6, same root cause); ③ declaring @deepseek-ai/dsh-atomic-write in dependencies got it hoisted over the app-bundled core package — the official health check flagged danger and the launcher blocked restart (#7); ④ the marketplace entry disappeared when dsh-codex-ui was enabled (#4).
+- **Root cause & fix**: ① entry claiming matched name === pkg only — mirrors the official dshmarket ownsLoaderEntry/carriedRowLive rule: exact-or-subpath names, plus claiming by the package's own patch insert ids (include-prefix stripped, dual id projection); ② `kindOf()` enumerated host kind by name and must leak — `tauri` joins the desktop name set, and host-sourced profiles gain a generation-projection fact probe (node_modules symlinks into .generations, or lockfile link: evidence ⇒ desktop delegation to the official manager; fallback hosts are never probed, zero drift; deliberately NOT "pluginManager presence" — official Web hosts provide it too), derivePrior/verifyNpmCommitState accept projections (generation dirs are self-contained rollback snapshots), WRITE_GUIDANCE empty strings and the dangling guard.noforce copy now give an actionable exit; ③ dsh-atomic-write vendored into `core/atomic-write.ts` per the report's option 2 (MIT, lock protocol byte-faithful), removed from dependencies with a dependency-hygiene guard test; ④ the shell-takeover sentinel is tiered (shell-takeover.js): cooperative shells (whose footer renders the footer.action slot; allowlist includes codex-ui NS) keep the entry, hostile shells (ds-bot class) still yield.
+- **Verification**: typecheck clean; on a DSH 0.2.1-rc.3 web host (link install) at the anchored SHA (9b80477), 1719/1719 tests with zero failures and a seven-item compatibility checklist all green (kind not misrouted / five-step write path / installed reconciliation / lock & atomic write / panel entry / CLI / doctor with zero danger verdicts); on Windows, the 17 failures match the pre-existing environment baseline name-for-name. Release note: #3/#6/#7 require upgrading to this version; a brand-new dataelement profile (no projection evidence yet) still installs via the web path.
 
 ### Fix in 0.10.10 — sidebar bilingual label registration silently dead (locale.register references undefined identifiers after dictionary extraction)
 
