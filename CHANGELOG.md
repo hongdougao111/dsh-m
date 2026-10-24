@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.12 重构：market 读写分缝——写侧出仓 market-mutation.ts（ADR-0024），零行为变化
+
+- **需求（2026-10-24 架构评审钢人裁决 + grill 两轮共识 10 项 + 计划/实施双独立评审闭环）**：`market.ts` 1960 行、37 个 export 读写混装（interface 近乎与实现同宽的浅模块），近两月 51 次触碰为 core 第一热点；0.10.11 社区 issue 四连修中 #3/#6「同根因合并修」需跨模块走链理解——locality 失效实证。
+- **方案（ADR-0024）**：写侧（安装/卸载/升级/自升级/守卫接线/mutation session/prior 快照）verbatim 迁出 `src/core/market-mutation.ts`（GLOSSARY 新词「市场变更编排 Market Mutation」），读侧（列表/搜索/已装投影/probe 预算/排序）留守 market.ts；依赖单向 mutation→read；全部调用方（src 5 处 + 测试 11 处）直改 import、不留任何 re-export，顺手清偿 ADR-0016 遗留的 merged-market 转手债（matchInstalledByEntry/communityOutcome/CommunityRegistrySummary 直连）；测试分册 `tests/market-mutation.test.mjs`。
+- **验证**：tsc 零错误；verbatim 红线经独立评审 LF 归一 diff 为空核证（960 行逐字一致）；全量测试 HEAD 与基线 1700/1672/18 逐名一致（18 失败为本机 Windows 环境既有 symlink EPERM 族，零新增、零用例丢失——116 用例守恒拆为 84+32）；check-release 除「tag≠HEAD」发版时点断言外全绿。零用户可见行为/文案变化。
+- **发版说明**：纯内部结构优化，无行为修复——升级非必需；为后续市场侧变更（新社区 issue、升级语义调整）显著降低理解与测试成本。实施计划：`docs/plans/2026-10-24-market-read-write-seams-implementation-plan.md`。
+
 ### 0.10.11 修复：社区 issue 四连——载体误报停用 / 桌面判型拒绝 / 核心包遮蔽 / codex-ui 入口消失（#2/#3+#6/#7/#4）
 
 - **需求（2026-10-20 起 GitHub 社区五份报告）**：①已装列表把载体型插件（dsh-ops、dsh-complex-project-preset）误报「已停用」，插件实际在跑（#2）；②桌面发行版 profile 名非 `desktop`（dsh-tauri 叫 `tauri`、dataelement/dsh-desktop 就叫 `web`）时写操作被拒或走错路径撞装后守卫（#3/#6 同根因）；③dependencies 携带 @deepseek-ai/dsh-atomic-write 被 profile pnpm 提升遮蔽应用自带核心包，官方 health 判危、启动壳拦重启（#7）；④启用 dsh-codex-ui 后插件市场入口消失（#4）。
@@ -738,6 +745,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Refactor in 0.10.12 — market read/write seams: write side extracted into market-mutation.ts (ADR-0024), zero behavior change
+
+- **Need (2026-10-24 steelman architecture verdict + two grill consensus rounds + independent plan & implementation reviews, all closed)**: `market.ts` had grown to 1960 lines / 37 exports mixing reads and writes (a shallow module whose interface is nearly as wide as its implementation), with 51 touches in two months — the #1 core hotspot; the 0.10.11 community-issue batch required cross-module chain-reading for the #3/#6 same-root-cause fix, evidence of failed locality.
+- **Approach (ADR-0024)**: the write side (install/uninstall/upgrade/self-upgrade, guard wiring, mutation session, prior snapshots) moved verbatim into `src/core/market-mutation.ts` (new glossary term "Market Mutation"), while the read side (listing/search/installed projection/probe budget/sorting) stays in market.ts; one-way dependency mutation→read; all callers (5 in src, 11 in tests) re-import directly with zero re-exports, also retiring the ADR-0016 merged-market forwarding debt (matchInstalledByEntry / communityOutcome / CommunityRegistrySummary now imported directly); tests split into `tests/market-mutation.test.mjs`.
+- **Verification**: typecheck clean; the verbatim red line verified by an independent reviewer via an LF-normalized empty diff (960 lines byte-identical); full suite identical to baseline at 1700/1672/18 (all 18 failures are the pre-existing Windows symlink-EPERM family — zero new failures, zero test loss: 116 cases conserved as 84+32); check-release green except the release-time tag≠HEAD assertion. Zero user-visible behavior or copy changes.
+- **Release note**: purely internal restructuring, no behavioral fixes — upgrading is optional; it significantly lowers the comprehension and testing cost of future marketplace-side changes. Implementation plan: `docs/plans/2026-10-24-market-read-write-seams-implementation-plan.md`.
 
 ### Fix in 0.10.11 — community issue batch: carrier false-disabled / desktop kind rejection / core-package shadowing / codex-ui entry missing (#2/#3+#6/#7/#4)
 
