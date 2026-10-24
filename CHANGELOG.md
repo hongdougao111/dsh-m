@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.13 文案更新：自研插件兼容清单同步 DSH 0.2.1-rc.3
+
+- **市场清单**：标记 dsh-skins Web 与 Desktop 均已实测 0.2.1-rc.3；补入 skip-browser-auth 与 copilot-auth 的 Web rc.3 实测；四个 decoupled 自研条目不再列 DSH 版本号，保留插件自身前置条件。
+- **保护名单锚点**：注释更新至 dsh-plugin-manager 0.2.1-rc.3；官方 17 项保护名单未变。
+- **验证**：npm test 全量 1723/1723 零失败。
+
 ### 0.10.12 重构：market 读写分缝——写侧出仓 market-mutation.ts（ADR-0024），零行为变化
 
 - **需求（2026-10-24 架构评审钢人裁决 + grill 两轮共识 10 项 + 计划/实施双独立评审闭环）**：`market.ts` 1960 行、37 个 export 读写混装（interface 近乎与实现同宽的浅模块），近两月 51 次触碰为 core 第一热点；0.10.11 社区 issue 四连修中 #3/#6「同根因合并修」需跨模块走链理解——locality 失效实证。
@@ -745,6 +751,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Copy update in 0.10.13 — self-built plugin compatibility metadata for DSH 0.2.1-rc.3
+
+- **Market registry**: record that dsh-skins was tested on DSH 0.2.1-rc.3 in both Web and Desktop; add the Web rc.3 smoke results for skip-browser-auth and copilot-auth; remove DSH release numbers from the four decoupled entries while retaining plugin prerequisites.
+- **Protected-list anchor**: update the source comment to dsh-plugin-manager 0.2.1-rc.3; the official 17-module set is unchanged.
+- **Verification**: all 1,723 tests passed with `npm test`.
 
 ### Refactor in 0.10.12 — market read/write seams: write side extracted into market-mutation.ts (ADR-0024), zero behavior change
 
