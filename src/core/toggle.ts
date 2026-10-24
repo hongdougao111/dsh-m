@@ -12,13 +12,14 @@
  *    （注意 live-plugin.ts 第二参是 disabled，方向取反）；bundle 级 = 锁内 bundles 数组
  *    编辑，恒 restart-required。
  *
- * 锁：与官方同款 `withFileLock(<profile>/package.json)`（dsh-atomic-write，锁文件
- * `package.json.lock`、wx 独占）——防与官方 UI 并发编辑 cordis.patch.yml 丢更新。
+ * 锁：与官方同款 writer lock（atomic-write.ts，vendor 自 @deepseek-ai/dsh-atomic-write，
+ * 锁文件 `package.json.lock`、wx 独占、锁记录 PID——issue #7 改 vendor 后协议不变）——
+ * 防与官方 UI 并发编辑 cordis.patch.yml 丢更新。
  * 开关不经 Profile 变更事务（grilling Q1）：单文件轻量编辑、幂等可逆。
  */
 import { readFile as fsReadFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock, writeFileAtomic } from './atomic-write.js'
 import { listInstalledPlugins, type InstalledPlugin } from './installed.js'
 import { isSingleRowPlugin, planRowOverride } from './patch-yaml.js'
 import { PROTECTED_MODULES } from './enablement.js'

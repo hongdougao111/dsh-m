@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { writeFileAtomic } from './atomic-write.js'
 import { cacheDir } from './env.js'
 import { fetchJsonLimited, fetchLimited } from './httpx.js'
 

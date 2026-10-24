@@ -12,7 +12,7 @@
  */
 import { readFile as readFileFs } from 'node:fs/promises'
 import { join } from 'node:path'
-import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
+import { writeFileAtomic, withFileLock } from './atomic-write.js'
 import { isExactVersion } from './versions.js'
 import { cachedPackumentTimes, DEFAULT_MINIMUM_RELEASE_AGE_MIN, readWorkspacePolicy } from './release-age.js'
 
