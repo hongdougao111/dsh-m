@@ -86,6 +86,17 @@
       "homepage": "https://github.com/liustack/modsearch"
     },
     {
+      "id": "dsh-ops",
+      "name": "DSH Ops",
+      "description": "Windows DSH 底层操作工具：文件读取、工具发现与 Shell 执行，Rust 紧凑输出降 Token，亦支持 Linux/macOS，详见仓库。",
+      "category": "essentials",
+      "tags": ["文件读取", "Shell", "文档解析", "Token 优化"],
+      "source": "npm",
+      "npm": "dsh-ops",
+      "github": "T-Auto/dsh-ops",
+      "homepage": "https://github.com/T-Auto/dsh-ops"
+    },
+    {
       "id": "dsh-skip-browser-auth",
       "name": "DSH Skip Browser Auth",
       "description": "替换官方 Connection 跳过 BrowserAuth，免 Token；已适配七个已审计精确版本对，详见仓库。仅支持 web profile；desktop 宿主一律自动休眠（多进程树判别），desktop 用户请保持最新版。",
