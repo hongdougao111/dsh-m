@@ -14,6 +14,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { packIssues, extractPackFiles } from './assert-pack.mjs'
+import { unapprovedEmails } from './lib/commit-identity.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -52,6 +53,23 @@ check(
   tagHead === head,
   tagHead === '' ? '本地无此 tag——先 git tag 再 push' : tagHead === head ? 'tag = HEAD' : `tag 指向 ${tagHead.slice(0, 8)} ≠ HEAD ${head.slice(0, 8)}`,
 )
+
+// retro S1（2026-10-24）：发版即公开历史——未推提交的 author/committer 必须是核准
+// 公开身份（GitHub noreply，或主人核准名单 iasi@163.com，与 dsh-quota-watch 同口径）。
+// 只查 origin/main..HEAD：仓库历史已有历史邮箱，不追溯；无未推提交 = 跳过。
+try {
+  const identityOut = execSync('git log --format=%ae%n%ce origin/main..HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const lines = identityOut.split(/\r?\n/).filter(Boolean)
+  const bad = unapprovedEmails(lines)
+  const commitCount = lines.length / 2
+  check(
+    `提交身份（未推 ${commitCount} 笔）`,
+    bad.length === 0,
+    lines.length === 0 ? '无未推提交——跳过' : bad.length === 0 ? '全部核准' : `未核准邮箱：${bad.join('、')}（核准名单见 scripts/lib/commit-identity.mjs）`,
+  )
+} catch (err) {
+  check('提交身份', false, String(err?.message ?? err))
+}
 
 // 0.10.7：发布物断言接线（assert-pack 同一份规则）——pack --dry-run（含 prepare 构建，~40s）
 try {
