@@ -34,6 +34,7 @@ const { createFavoritesStore, partitionStale } = require("./favorites.js");
 const { readSelfCheckCache, writeSelfCheckCache, clearSelfCheckCache, deriveChipState } = require("./self-check.js");
 const { shouldShowInstallCmd } = require("./install-cmd.js");
 const { createOpOutcome } = require("./op-outcome.js");
+const { isNativeFootShell } = require("./shell-takeover.js");
 
 // ---------- i18n（ADR-0023 第一刀：词典与取值函数出仓 src/client/i18n.js，main.jsx 仅保留装配） ----------
 const { lookup, browserLang, communityLabels, ZH, EN } = require("./i18n.js");
@@ -931,20 +932,24 @@ function MarketIcon() {
   );
 }
 
-// ---------- 壳接管哨兵（2026-10-13 ds-bot 视图页脚整行让位） ----------
+// ---------- 壳接管哨兵（2026-10-13 ds-bot 视图页脚整行让位；2026-10-24 issue #4 分档） ----------
 // sidebar.workspaces 座位属于占领者（ui-sidebar 官方注释："the foot is the
 // sidebar.workspaces registrant's"）：官方工作区树以缺省 priority 0 注册
-// （ui-workspace），负 priority 占位者即"换壳"插件（ds-bot 以 -10 接管其
-// 原生 bot 侧栏）。哨兵为真 = 当前页脚是壳插件的原生界面，市场入口整行
-// 让位；为假 = 官方 harness 页脚，照常在场。故意做成无 hook 的渲染期同步
+// （ui-workspace），负 priority 占位者即"换壳"插件。判定拆分档：敌意换壳
+// （原生页脚不消费 footer.action 槽，ds-bot -10 档）→ 市场入口整行让位；
+// 合作换壳（接管者页脚自己渲染 footer.action 槽条目，dsh-codex-ui 档）→
+// 照常在场——issue #4 主案：codex-ui 的 .dcu-foot 逐条渲染 footer.action，
+// 旧的一刀切让位把市场按钮整没了。判别与名单在 shell-takeover.js（DOM-free
+// 纯函数 + 直测；fail-safe：未列名的负 priority 接管仍让位）。
 // 读：SidebarRoot 本身订阅 sidebar.workspaces（它渲染那个槽），壳接管翻转
 // 必然级联重渲染页脚并重读此处。耦合点是官方槽位契约（sidebar.workspaces
-// 的声明与台账），不是 ds-bot 内部实现。
+// 的声明与台账），不是任何换壳插件内部实现。
 let dshmSlotsRef = null;
 const shellTakeover = () => {
   try {
-    return ((dshmSlotsRef && dshmSlotsRef.entries ? dshmSlotsRef.entries("sidebar.workspaces") : []) || [])
-      .some((entry) => (entry.options.priority ?? 0) < 0);
+    return isNativeFootShell(
+      (dshmSlotsRef && dshmSlotsRef.entries ? dshmSlotsRef.entries("sidebar.workspaces") : []) || [],
+    );
   } catch {
     return false;
   }
