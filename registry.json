@@ -247,6 +247,17 @@
       "npm": "dsh-mcp-tools",
       "github": "hxlog/dsh-mcp-tools",
       "homepage": "https://github.com/hxlog/dsh-mcp-tools"
+    },
+    {
+      "id": "dsh-archive-trash",
+      "name": "DSH Archive Trash",
+      "description": "会话删除：任意会话行内一键删、批量清空、可还原回收站，僵尸条目自动清理。",
+      "category": "watchlist",
+      "tags": ["会话管理", "归档", "回收站", "清理"],
+      "source": "npm",
+      "npm": "dsh-archive-trash",
+      "github": "hongdougao111/dsh-archive-trash",
+      "homepage": "https://github.com/hongdougao111/dsh-archive-trash"
     }
   ]
 }
