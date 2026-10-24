@@ -10,7 +10,8 @@ import { writeFileSync, readFileSync, rmSync, mkdtempSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { listInstalledWithMeta, installFromRegistry } from '../lib/core/market.js'
+import { listInstalledWithMeta } from '../lib/core/market.js'
+import { installFromRegistry } from '../lib/core/market-mutation.js'
 import { npmLatest, npmPackument, npmPackumentReadme, npmVersion } from '../lib/core/versions.js'
 import { clearPackumentAccessorCache } from '../lib/core/packument.js'
 

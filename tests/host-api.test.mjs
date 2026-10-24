@@ -889,7 +889,7 @@ describe('host-api：0.4.0 set-enabled / forceIncompatible（Task 14）', () => 
 
 describe('host-api：install 装后守卫拦截 → 409 + toWire 投影', () => {
   it('InstallGuardError → 409 + toWire 六字段投影 + repairBasis 键缺席（0.9.93 收敛钉例）', async () => {
-    const { InstallGuardError } = await import('../lib/core/market.js')
+    const { InstallGuardError } = await import('../lib/core/market-mutation.js')
     const { dispatcher } = setup({
       installFromRegistry: async () => {
         throw new InstallGuardError({

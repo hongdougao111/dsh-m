@@ -234,7 +234,7 @@ describe('readDeps 快照与注入', () => {
 
 describe('InstallGuardError.toWire 线格式（0.9.93 收敛：五处投影单一事实源）', () => {
   it('无 repairBasis → 六字段齐 + 键缺席（repairBasis in wire === false）', async () => {
-    const { InstallGuardError } = await import('../lib/core/market.js')
+    const { InstallGuardError } = await import('../lib/core/market-mutation.js')
     const e = new InstallGuardError({
       kind: 'manual_required',
       message: 'm',
@@ -255,7 +255,7 @@ describe('InstallGuardError.toWire 线格式（0.9.93 收敛：五处投影单�
   })
 
   it('带 repairBasis → 键在场', async () => {
-    const { InstallGuardError } = await import('../lib/core/market.js')
+    const { InstallGuardError } = await import('../lib/core/market-mutation.js')
     const e = new InstallGuardError({
       kind: 'manual_required',
       message: 'm',
@@ -269,7 +269,7 @@ describe('InstallGuardError.toWire 线格式（0.9.93 收敛：五处投影单�
   })
 
   it('键序钉例：kind,violations,compensation,needsRestart,restartSafe（+repairBasis 尾随）', async () => {
-    const { InstallGuardError } = await import('../lib/core/market.js')
+    const { InstallGuardError } = await import('../lib/core/market-mutation.js')
     const e = new InstallGuardError({
       kind: 'compensated',
       message: 'm',

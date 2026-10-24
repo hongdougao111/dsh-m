@@ -14,12 +14,14 @@ import {
   listInstalledWithMeta,
   listMarket,
   existingMarketIds,
+} from './market.js'
+import {
   installFromRegistry,
   selfUpgrade,
   uninstallPlugin,
   upgradePlugin,
   InstallGuardError,
-} from './market.js'
+} from './market-mutation.js'
 import { runProfileTransaction, TransactionError, makeNpmWarmPackument } from './profile-transaction.js'
 import { listExternalOperations, clearExternalOperations, removeExternalOperation } from './external-journal.js'
 import { readUpgradeIntent, resolveUpgradeIntent, writeUpgradeIntent } from './upgrade-intent.js'

@@ -12,7 +12,7 @@ import { writeFileSync, readFileSync, rmSync, mkdtempSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { installFromRegistry } from '../lib/core/market.js'
+import { installFromRegistry } from '../lib/core/market-mutation.js'
 import { readPnpmLockOverrides } from '../lib/core/npm-integrity.js'
 import { classifyPnpmError } from '../lib/core/dsh-cli.js'
 import { TransactionError } from '../lib/core/profile-transaction.js'

@@ -6,16 +6,18 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { installTimeoutMs } from './core/env.js'
 import {
-  installFromRegistry,
   listInstalledWithMeta,
   listMarket,
+  type InstalledResult,
+} from './core/market.js'
+import {
+  installFromRegistry,
   selfUpgrade,
   uninstallPlugin,
   upgradePlugin,
   InstallGuardError,
-  type CommunityRegistrySummary,
-  type InstalledResult,
-} from './core/market.js'
+} from './core/market-mutation.js'
+import type { CommunityRegistrySummary } from './core/merged-market.js'
 import type { RegistryConfig, RegistryEntry, RegistryState } from './core/registry.js'
 import { COMMUNITY_CATEGORY_LABELS } from './core/community.js'
 import { parseMarketQueryInput, PRIMARY_CATEGORY_LABELS, SEARCH_CORE_DEADLINE_MS, INSTALLED_CORE_DEADLINE_MS } from './core/market-query.js'

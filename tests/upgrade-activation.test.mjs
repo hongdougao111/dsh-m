@@ -12,7 +12,7 @@ import { writeFileSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { upgradePlugin, selfUpgrade } from '../lib/core/market.js'
+import { upgradePlugin, selfUpgrade } from '../lib/core/market-mutation.js'
 import { desktopUpgradeFromRegistry } from '../lib/core/profile-ops.js'
 import { _resetMergedMarketForTests } from '../lib/core/merged-market.js'
 // R1-1：L2 物化代跨用例隔离（fixture 假身份可能同键；node --test 文件内共享模块状态）

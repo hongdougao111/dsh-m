@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { InstallGuardError } from '../lib/core/market.js'
+import { InstallGuardError } from '../lib/core/market-mutation.js'
 
 async function registerWith(installBehavior) {
   const { registerTools } = await import('../lib/tools.js')

@@ -6,15 +6,17 @@
  * registry/search/list/outdated 在清单不可用时打印配置/实际生效地址并 exit 1。
  */
 import {
-  installFromRegistry,
   listInstalledWithMeta,
   listMarket,
-  uninstallPlugin,
-  upgradePlugin,
-  InstallGuardError,
   type InstalledResult,
   type MarketResult,
 } from './core/market.js'
+import {
+  installFromRegistry,
+  uninstallPlugin,
+  upgradePlugin,
+  InstallGuardError,
+} from './core/market-mutation.js'
 import { togglePlugin as coreTogglePlugin } from './core/toggle.js'
 import { runDoctor } from './core/doctor.js'
 import { readLauncherPackageVersion } from './core/dsh-version.js'

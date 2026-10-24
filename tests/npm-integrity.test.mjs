@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { npmVersion } from '../lib/core/versions.js'
 import { readPnpmLockIntegrity, assertNpmIntegrity, snapshotFiles, restoreSnapshots, verifySnapshots } from '../lib/core/npm-integrity.js'
 import { classifyPnpmError } from '../lib/core/dsh-cli.js'
-import { installFromRegistry } from '../lib/core/market.js'
+import { installFromRegistry } from '../lib/core/market-mutation.js'
 import { TransactionError } from '../lib/core/profile-transaction.js'
 import { _setWireFetchForTests } from '../lib/core/httpx.js'
 
