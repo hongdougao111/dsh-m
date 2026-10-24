@@ -35,6 +35,7 @@ import { Buffer } from 'node:buffer'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { webProfileDir } from './env.js'
+import { isGenerationProjectionPkg } from './generation-projection.js'
 import { isSafePkgName, resolvePluginDir } from './installed.js'
 import { setLivePluginDisabled } from './live-plugin.js'
 import { warmPackumentFor } from './packument.js'
@@ -104,6 +105,8 @@ export const TX_HEAL_CODES = [
   'ROLLBACK_BYTES_RESTORED', 'ROLLBACK_CONVERGED_FROZEN', 'ROLLBACK_FALLBACK_REMOVED',
   'ROLLBACK_VERIFY_FAILED', 'LIVE_DISABLED', 'LIVE_REENABLED', 'LIVE_REENABLE_FAILED',
   'PATCH_ENTRIES_STRIPPED', 'PATCH_MAPPING_RESTORED',
+  // issue #6 修法 B2：generation 投影包跳过 lockfile integrity 对照（代际系统 own 完整性）
+  'GENERATION_PROJECTION_ACCEPTED',
 ] as const
 
 export const TX_FAILURE_CODES = [
@@ -719,6 +722,17 @@ async function verifyNpmCommitState(
         note: `安装链把依赖写成 range（${depsNow[req.pkg]}，旧版 CLI save-prefix 行为）；精确性由 lockfile integrity 校验继续保证`,
       })
     }
+  }
+  // issue #6 修法 B2：generation 投影包（宿主代际系统管理，node_modules/<pkg> 符号链接
+  // 指向 .generations）的 lockfile 恒为 `link:`（无 resolution.integrity）——完整性由代际
+  // 系统拥有，按基线对照必然误判 LOCK_INTEGRITY_MISMATCH 并回滚。跳过 integrity 对照并
+  // 记录 heal（deps 存在性/版本锚定检查仍照常执行）。
+  if (isGenerationProjectionPkg(d.profileDir, req.pkg)) {
+    heal.push({
+      code: 'GENERATION_PROJECTION_ACCEPTED',
+      note: `node_modules/${req.pkg} 为 .generations 投影（宿主代际系统管理完整性），跳过 lockfile integrity 对照`,
+    })
+    return
   }
   let lockText: string
   try {

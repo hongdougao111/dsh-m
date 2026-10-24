@@ -64,6 +64,7 @@ import { ensureLatestCacheSwept, invalidateLatestCache, latestCacheKey, latestIt
 import { verifyInstalledAdditions, type GuardViolation } from './install-guard.js'
 import { journalExternalOperation, type OperationChannel, type AppendExternalOperation } from './external-journal.js'
 import { readPnpmLockIntegrity } from './npm-integrity.js'
+import { isGenerationProjectionPkg } from './generation-projection.js'
 import type { CompensateEvidence, PriorUnion, TransactionResult } from './profile-transaction.js'
 import { decodeUtf8Fatal, fetchTextLimited } from './httpx.js'
 import {
@@ -1302,10 +1303,17 @@ function mappingFor(mapping: { workspace: Array<{ key: string; patchPath: string
  * prior 派生（add 返回真实 key 后、守卫前）：严格按真实 key 关联快照；判定表唯一映射。
  * 来源白名单（独立实现，不复用 parseSpecSource）：精确 npm version（含 ^/~ 书写）与
  * pinned github commit + lock identity 可自动恢复；alias/workspace/tarball URL/git+ssh/link/file 一律 restorable:false。
+ *
+ * facts.generationProjected（issue #6 修法 B）：node_modules/<pkg> 是宿主代际系统的
+ * .generations 投影时，代际目录自身就是完整可回退快照（官方代际系统拥有完整性与
+ * 回退），restorable 直接成立，不依赖 lockfile integrity——generation 安装形态的
+ * lockfile 恒为 `link:`（无 resolution.integrity），按基线判 restorable:false 会把
+ * 全部投影形态插件硬拒在 prior 门（dataelement/dsh-desktop 实测 12/12 命中）。
  */
 export function derivePrior(
   snapshot: PreMutationSnapshot,
   realKey: string,
+  facts?: { generationProjected?: boolean },
 ): { kind: 'none' } | { kind: 'mappingOnly'; patchMapping: { workspace: Array<{ key: string; patchPath: string }>; manifest: Array<{ key: string; patchPath: string }> } } | { kind: 'dependency'; state: PriorStateExport } | { kind: 'unavailable'; reason: string } {
   const spec = snapshot.deps[realKey]
   const mapping = mappingFor(snapshot.mapping, realKey)
@@ -1329,6 +1337,7 @@ export function derivePrior(
     sourceKind = 'github'
     restorable = Boolean(lock?.commit)
   }
+  if (facts?.generationProjected === true) restorable = true
   return {
     kind: 'dependency',
     state: {
@@ -1500,13 +1509,14 @@ async function installEntryLocked(
       throw new Error(`变更前状态捕获失败：${pre.reason}；拒绝安装（fail-closed）`)
     }
     // npm key 事务前已知：prior 派生与 restorable 检查在事务前完成
-    const prior = derivePrior(pre.snapshot, pkg)
+    // （issue #6 修法 B：投影形态包不受 lock integrity 判据约束，见 derivePrior 注）
+    const prior = derivePrior(pre.snapshot, pkg, { generationProjected: isGenerationProjectionPkg(profileDir, pkg) })
     if (prior.kind === 'unavailable') {
       throw new Error(`prior 关联歧义：${prior.reason}；拒绝安装（fail-closed）`)
     }
     if (prior.kind === 'dependency' && !prior.state.restorable) {
       throw guardManualRequired(
-        `「${pkg}」的原安装形态（${prior.state.sourceKind === 'other' ? 'link/file 等非 registry 来源' : 'pnpm-lock.yaml 未解析出该依赖的 integrity（键缺失或为别名/URL 等非 registry 写法）'}）无法自动回退，请先手动处理（卸载或修复后重试）`,
+        `「${pkg}」的原安装形态（${prior.state.sourceKind === 'other' ? 'link/file 等非 registry 来源' : 'pnpm-lock.yaml 未解析出该依赖的 integrity（键缺失或为别名/URL 等非 registry 写法）'}）无法自动回退，请先手动处理（卸载或修复后重试）；也可在官方宿主插件管理界面（Settings → Plugins）操作该插件`,
         [{ pkg, code: 'NO_DSH_MARKER', detail: `prior restorable:false（sourceKind=${prior.state.sourceKind}）` }],
       )
     }
@@ -1619,7 +1629,7 @@ async function installEntryLocked(
     if (candidate === null || !/^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/.test(candidate)) {
       throw new Error(`GitHub candidate key 不可用（${candidate ?? 'name 缺失'}）：拒绝安装（fail-closed）`)
     }
-    const candidatePrior = derivePrior(pre.snapshot, candidate)
+    const candidatePrior = derivePrior(pre.snapshot, candidate, { generationProjected: isGenerationProjectionPkg(profileDir, candidate) })
     if (candidatePrior.kind === 'unavailable') {
       throw new Error(`prior 关联歧义：${candidatePrior.reason}；拒绝安装（fail-closed）`)
     }
@@ -1639,7 +1649,7 @@ async function installEntryLocked(
     // → manual-repair 非成功状态（不冒充 pre-mutation 拒绝、不承诺 prior 无损）
     let prior = candidatePrior
     if (realKey !== candidate) {
-      const real = derivePrior(pre.snapshot, realKey)
+      const real = derivePrior(pre.snapshot, realKey, { generationProjected: isGenerationProjectionPkg(profileDir, realKey) })
       if (real.kind === 'unavailable') {
         throw new Error(`prior 关联歧义（真实 key ${realKey}）：${real.reason}；拒绝继续（fail-closed）`)
       }

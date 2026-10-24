@@ -5,6 +5,15 @@ import { join } from 'node:path'
 export const WEB_PROFILE = 'web'
 export const DESKTOP_PROFILE = 'desktop'
 
+/**
+ * 已知桌面宿主的 profile 名全集（issue #3/#6：名字只是快路径，事实升级见
+ * active-profile.ts 的 generation 投影探测）。官方 dsh-desktop 用 `desktop`；
+ * dsh-tauri 0.2.1-rc.2 起实际 profile 名是 `tauri`（宿主以 --profile tauri 启动，
+ * 旧 desktop 目录留作 legacy）；dataelement/dsh-desktop 的日常 profile 甚至叫
+ * `web`——名字枚举必然继续漏，漏网的靠投影事实兜住。
+ */
+export const DESKTOP_PROFILE_NAMES: readonly string[] = ['desktop', 'tauri']
+
 export function dshHome(): string {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }

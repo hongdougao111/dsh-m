@@ -133,3 +133,56 @@ describe('assertWriteAllowed：能力表全矩阵', () => {
     }
   })
 })
+
+describe('resolveActiveProfile：宿主形态事实升级（issue #3/#6，generation-projection 探测）', () => {
+  const pcOf = (name, dir) => ({ get: (n) => (n === 'profileContext' ? { name, dir } : undefined) })
+
+  it('name=tauri（官方 dsh-tauri 实名，issue #3）→ kind desktop', () => {
+    const p = resolveActiveProfile(ctxOf(pcOf('tauri', '/tmp/dsh/profiles/tauri')))
+    assert.deepEqual(
+      { name: p.name, kind: p.kind, source: p.source },
+      { name: 'tauri', kind: 'desktop', source: 'host' },
+    )
+  })
+
+  it('name=web + 投影事实（issue #6 dataelement 主案）→ 升级 kind desktop、名字不变', () => {
+    const p = resolveActiveProfile(ctxOf(pcOf('web', '/tmp/dsh/profiles/web')), { generationProbe: () => true })
+    assert.deepEqual(
+      { name: p.name, kind: p.kind, dir: p.dir, source: p.source },
+      { name: 'web', kind: 'desktop', dir: '/tmp/dsh/profiles/web', source: 'host' },
+    )
+  })
+
+  it('name=web + 无投影事实 → kind web（真官方 web 不改道）', () => {
+    const p = resolveActiveProfile(ctxOf(pcOf('web', '/tmp/dsh/profiles/web')), { generationProbe: () => false })
+    assert.equal(p.kind, 'web')
+  })
+
+  it('未知名 + 投影事实 → 升级 desktop（事实优先于名字枚举；未知名零事实仍 unknown 拒写）', () => {
+    assert.equal(resolveActiveProfile(ctxOf(pcOf('future-name', '/x')), { generationProbe: () => true }).kind, 'desktop')
+    assert.equal(resolveActiveProfile(ctxOf(pcOf('future-name', '/x')), { generationProbe: () => false }).kind, 'unknown')
+  })
+
+  it('fallback（无 profileContext）不做探测、恒 web——旧行为零漂移', () => {
+    let probed = false
+    const p = resolveActiveProfile(ctxOf({ get: () => undefined }), { generationProbe: () => { probed = true; return true } })
+    assert.equal(p.kind, 'web')
+    assert.equal(p.source, 'fallback')
+    assert.equal(probed, false, 'fallback 路径不得触发探测（旧行为零漂移）')
+  })
+
+  it('探测抛错 → 维持名字判定（事实不可得 ≠ 事实否定）', () => {
+    const p = resolveActiveProfile(ctxOf(pcOf('web', '/tmp/dsh/profiles/web')), { generationProbe: () => { throw new Error('boom') } })
+    assert.equal(p.kind, 'web')
+  })
+})
+
+describe('WRITE_GUIDANCE：拒绝文案必须给可操作出口（issue #3 尾巴）', () => {
+  it('install / set-enabled 指引非空且含官方插件页入口', () => {
+    for (const action of ['install', 'set-enabled']) {
+      const g = WRITE_GUIDANCE[action]
+      assert.ok(typeof g === 'string' && g.length > 0, `${action} 指引不得为空串`)
+      assert.ok(g.includes('Settings → Plugins'), `${action} 指引应含官方 Settings → Plugins 入口`)
+    }
+  })
+})

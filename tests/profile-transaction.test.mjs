@@ -19,6 +19,7 @@ import {
 import { snapshotFiles, atomicWriteFile } from '../lib/core/npm-integrity.js'
 import { classifyPnpmError, PNPM_OUTCOME_CODES } from '../lib/core/dsh-cli.js'
 import { parse as yamlParse } from 'yaml'
+import { _setProjectionIoForTests } from '../lib/core/generation-projection.js'
 
 // ---------- fixtures（事故同形摘要；Task 11 起共享 tests/fixtures/pnpm-errors.mjs） ----------
 
@@ -2190,5 +2191,78 @@ describe('补丁映射 YAML 引号宽容与重复键根治（0.9.94 D9）', () =
     assert.ok(res.failure.note.includes('pnpm-workspace.yaml 复读失败'), `note 应含复读失败：${res.failure.note}`)
     const ws = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
     assert.ok(ws.includes('  "scoped@1.0.0": patches/a.patch'), 'restore 退化分支仍逐字追加（保守不收紧）')
+  })
+})
+
+describe('generation 投影 verify 跳过（issue #6 修法 B2：代际系统 own 完整性）', () => {
+  let dir = ''
+  afterEach(() => {
+    _setProjectionIoForTests(null)
+    if (dir) rmSync(dir, { recursive: true, force: true })
+    dir = ''
+  })
+
+  /** generation link: 形态 lockfile：importer 记 link:，packages 段无该包 integrity。 */
+  const generationLock = `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      pkg-a:
+        specifier: 1.2.3
+        version: link:../.generations/live/pkg-a+1.2.3+abc/node_modules/pkg-a
+`
+
+  it('add 后 lock 无 integrity 但 node_modules/<pkg> 是 .generations 投影 → committed + heal 记录', async () => {
+    dir = makeProfile({
+      'package.json': manifest({ name: 's', private: true, dependencies: { existing: '^1.0.0' } }),
+      'pnpm-lock.yaml': lockFile({ withOverrides: false }),
+      'pnpm-workspace.yaml': 'packages:\n  - .\n',
+    })
+    const { runner } = mockRunner({
+      add: [async () => {
+        writeFileSync(join(dir, 'package.json'), manifest({ name: 's', private: true, dependencies: { existing: '^1.0.0', 'pkg-a': '1.2.3' } }))
+        writeFileSync(join(dir, 'pnpm-lock.yaml'), generationLock)
+        return { class: 'ok', output: 'added' }
+      }],
+    })
+    const pkgPath = join(dir, 'node_modules', 'pkg-a')
+    _setProjectionIoForTests({
+      lstatSync: (p) => {
+        if (p === pkgPath) return { isSymbolicLink: () => true }
+        throw new Error(`ENOENT ${p}`)
+      },
+      readlinkSync: (p) => {
+        if (p === pkgPath) return '../../.generations/live/pkg-a+1.2.3+abc/node_modules/pkg-a'
+        throw new Error(`EINVAL ${p}`)
+      },
+    })
+    const r = await runProfileTransaction(
+      { kind: 'install-npm', pkg: 'pkg-a', version: '1.2.3', integrity: sha512('good') },
+      baseTx(dir, runner),
+    )
+    assert.equal(r.status, 'committed', `实际 ${r.status} failure=${JSON.stringify(r.failure)}`)
+    assert.ok(healCodes(r).includes('GENERATION_PROJECTION_ACCEPTED'), `heals=${healCodes(r)}`)
+  })
+
+  it('负控：同样 lock 无 integrity、无投影事实 → LOCK_INTEGRITY_MISMATCH rolled-back（跳过必须由事实驱动）', async () => {
+    dir = makeProfile({
+      'package.json': manifest({ name: 's', private: true, dependencies: { existing: '^1.0.0' } }),
+      'pnpm-lock.yaml': lockFile({ withOverrides: false }),
+      'pnpm-workspace.yaml': 'packages:\n  - .\n',
+    })
+    const { runner } = mockRunner({
+      add: [async () => {
+        writeFileSync(join(dir, 'package.json'), manifest({ name: 's', private: true, dependencies: { existing: '^1.0.0', 'pkg-a': '1.2.3' } }))
+        writeFileSync(join(dir, 'pnpm-lock.yaml'), generationLock)
+        return { class: 'ok', output: 'added' }
+      }],
+    })
+    const r = await runProfileTransaction(
+      { kind: 'install-npm', pkg: 'pkg-a', version: '1.2.3', integrity: sha512('good') },
+      baseTx(dir, runner),
+    )
+    assert.equal(r.status, 'rolled-back')
+    assert.equal(r.failure.code, 'LOCK_INTEGRITY_MISMATCH')
   })
 })

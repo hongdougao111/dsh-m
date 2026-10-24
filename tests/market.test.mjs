@@ -13,6 +13,7 @@ import { listMarket, listInstalledWithMeta, installFromRegistry, upgradePlugin, 
 import { IncompatibleError } from '../lib/core/compat-check.js'
 import { latestCacheKey, readLatestCache, writeLatestCache, resetLatestCacheForTest } from '../lib/core/latest-cache.js'
 import { _resetMergedMarketForTests, _mergedMarketStatsForTests } from '../lib/core/merged-market.js'
+import { _setProjectionIoForTests } from '../lib/core/generation-projection.js'
 // R1-1：L2 物化代跨用例隔离（fixture 假身份可能同键；node --test 文件内共享模块状态）
 beforeEach(() => _resetMergedMarketForTests())
 
@@ -2003,6 +2004,112 @@ packages:
       assert.equal(prior.state.integrity, sha512('peer'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('generation 投影 prior 事实（issue #6 修法 B：投影目录即完整快照，不依赖 lock integrity）', () => {
+  afterEach(() => _setProjectionIoForTests(null))
+
+  it('derivePrior：restorable:false 形态 + 投影事实 → restorable true（无事实时维持 false）', () => {
+    const snapshot = {
+      deps: { 'dsh-x': 'link:../.generations/live/dsh-x+1.0.0+abc/node_modules/dsh-x' },
+      lockResolutions: {},
+      mapping: { workspace: [], manifest: [] },
+    }
+    const base = derivePrior(snapshot, 'dsh-x')
+    assert.equal(base.kind, 'dependency')
+    assert.equal(base.state.restorable, false, '基线：link/别名形态不可自动回退')
+    const prior = derivePrior(snapshot, 'dsh-x', { generationProjected: true })
+    assert.equal(prior.kind, 'dependency')
+    assert.equal(prior.state.restorable, true, '投影事实补上可回退性（代际目录自身可回退）')
+    assert.equal(prior.state.sourceKind, 'other', 'sourceKind 仍按 spec 形态如实标注')
+  })
+
+  it('升级投影形态已装插件：prior 门放行 → 事务提交（同 fixture 无事实时被硬拒）', async () => {
+    // dataelement lock 形态：importer 记 link: 到 .generations，packages 段无 integrity
+    const profileDir = txProfile({
+      'package.json': JSON.stringify({ name: 'p', private: true, dependencies: { 'dsh-x': '1.0.0' } }, null, 2) + '\n',
+      'pnpm-lock.yaml': `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      dsh-x:
+        specifier: 1.0.0
+        version: link:../.generations/live/dsh-x+1.0.0+abc/node_modules/dsh-x
+`,
+      'pnpm-workspace.yaml': 'packages:\n  - .\n',
+    })
+    try {
+      const pkgPath = join(profileDir, 'node_modules', 'dsh-x')
+      _setProjectionIoForTests({
+        lstatSync: (p) => {
+          if (p === pkgPath) return { isSymbolicLink: () => true }
+          throw new Error(`ENOENT ${p}`)
+        },
+        readlinkSync: (p) => {
+          if (p === pkgPath) return '../../.generations/live/dsh-x+1.0.0+abc/node_modules/dsh-x'
+          throw new Error(`EINVAL ${p}`)
+        },
+      })
+      const { runner, calls } = mockTxRunner({
+        add: [async () => {
+          writeFileSync(join(profileDir, 'package.json'), JSON.stringify({ name: 'p', private: true, dependencies: { 'dsh-x': '2.0.0' } }, null, 2) + '\n')
+          writeFileSync(join(profileDir, 'pnpm-lock.yaml'), `lockfileVersion: '9.0'
+
+packages:
+  'dsh-x@2.0.0':
+    resolution: {integrity: ${sha512('good')}}
+`)
+          writeInstalledMarkerPkg(profileDir, 'dsh-x')
+          return { class: 'ok', output: 'add-ok', buildApprovals: [], fallbackAllBuilds: false }
+        }],
+      }, profileDir)
+      const deps = {
+        loadRegistry: async () => readyLoaded([{ id: 'gx', name: 'GX', description: 'd', category: 'tools', tags: [], source: 'npm', npm: 'dsh-x' }]),
+        listInstalledPlugins: async () => ({ items: [{ pkg: 'dsh-x', name: 'dsh-x', version: '1.0.0', source: 'npm', spec: 'dsh-x@1.0.0' }], others: 0, complete: true, profileDir }),
+        npmLatest: async () => ({ version: '2.0.0', integrity: sha512('good') }),
+        precheck: async () => null,
+        fetchCommunityCatalog: async () => ({ state: { enabled: false, status: 'disabled', version: null, checkedAt: null, fetchedAt: null, route: null, count: 0, errors: [], warnings: [] }, catalog: null }),
+        transaction: { runner: () => runner, profileDir },
+        classifyActivation: async () => 'unknown',
+      }
+      const res = await upgradePlugin('dsh-x', cfg, {}, deps)
+      assert.equal(res.version, '2.0.0')
+      assert.equal(calls.add.length, 1, '投影事实放行后 add 恰好执行一次')
+    } finally {
+      rmSync(profileDir, { recursive: true, force: true })
+    }
+  })
+
+  it('负控：同 fixture 无投影事实 → prior 门硬拒（事实是放行的唯一原因）', async () => {
+    const profileDir = txProfile({
+      'package.json': JSON.stringify({ name: 'p', private: true, dependencies: { 'dsh-x': '1.0.0' } }, null, 2) + '\n',
+      'pnpm-lock.yaml': `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      dsh-x:
+        specifier: 1.0.0
+        version: link:../.generations/live/dsh-x+1.0.0+abc/node_modules/dsh-x
+`,
+      'pnpm-workspace.yaml': 'packages:\n  - .\n',
+    })
+    try {
+      const deps = {
+        loadRegistry: async () => readyLoaded([{ id: 'gx', name: 'GX', description: 'd', category: 'tools', tags: [], source: 'npm', npm: 'dsh-x' }]),
+        listInstalledPlugins: async () => ({ items: [{ pkg: 'dsh-x', name: 'dsh-x', version: '1.0.0', source: 'npm', spec: 'dsh-x@1.0.0' }], others: 0, complete: true, profileDir }),
+        npmLatest: async () => ({ version: '2.0.0', integrity: sha512('good') }),
+        precheck: async () => null,
+        fetchCommunityCatalog: async () => ({ state: { enabled: false, status: 'disabled', version: null, checkedAt: null, fetchedAt: null, route: null, count: 0, errors: [], warnings: [] }, catalog: null }),
+        transaction: { profileDir },
+        classifyActivation: async () => 'unknown',
+      }
+      await assert.rejects(upgradePlugin('dsh-x', cfg, {}, deps), /无法自动回退/, 'restorable:false 无事实兜底必须仍被硬拒')
+    } finally {
+      rmSync(profileDir, { recursive: true, force: true })
     }
   })
 })
