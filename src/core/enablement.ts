@@ -16,7 +16,7 @@
  *   phase 恒 null。
  *
  * PROTECTED_MODULES：'dsh-m' 自保护 + 逐字镜像官方全集（锚点：
- * @deepseek-ai/dsh-plugin-manager@0.2.1-rc.2 lib/index.js 的 protectedModules，
+ * @deepseek-ai/dsh-plugin-manager@0.2.1-rc.3 lib/index.js 的 protectedModules，
  * L1273-1291，17 项；0.2.1 新增 @deepseek-ai/dsh-api-remote-access）。
  * 每次 DSH 升级后 diff 官方名单同步（know-how 008 升级必查口径）。
  */
