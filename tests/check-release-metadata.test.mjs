@@ -5,7 +5,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { APPROVED_PUBLIC_EMAILS, isApprovedCommitEmail, unapprovedEmails } from '../scripts/lib/commit-identity.mjs'
+import { APPROVED_PUBLIC_EMAILS, isApprovedCommitEmail, unapprovedEmails } from '../scripts/commit-identity.mjs'
 
 test('核准身份：GitHub noreply 恒过（web 机默认形态）', () => {
   assert.equal(isApprovedCommitEmail('26645513+iasiv5@users.noreply.github.com'), true)

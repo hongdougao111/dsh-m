@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { packIssues, extractPackFiles } from './assert-pack.mjs'
-import { unapprovedEmails } from './lib/commit-identity.mjs'
+import { unapprovedEmails } from './commit-identity.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
