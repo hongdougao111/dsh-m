@@ -8,6 +8,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.15 显示名：官方插件页标题「dsh-m」→「插件市场（dsh-m）」
+
+- **背景**：DSH 官方插件页的插件卡标题按「exported locale 的 `meta.title` → package.json → 包名」取值；`dshmarket` 借 `locale/zh.json` 显示「插件市场」，而 dsh-m 无 locale 文件，标题回退成裸包名 `dsh-m`，与描述文案（中文）不对称。
+- **修法**：① 新增 `locale/zh.json` + `locale/en.json`（`meta.title` = 「插件市场（dsh-m）」/ "Plugin Marketplace (dsh-m)"；中文描述与 package.json description 逐字一致，英文描述为新译）；② package.json 暴露 `./locale/*.json` 导出并把 `locale` 列入发布面（`en.json` 是宿主扫描 locale 目录的发现锚，缺它整目录失效）；③ assert-pack 门禁把两个 locale 文件列为发布必备；④ 新增 `tests/plugin-meta-locale.test.mjs` 守卫（exports 键、双语 meta 合法性、中文标题回归锚、门禁自洽）。
+- **部署**：宿主 `readPluginMeta` 在每次构建插件清单时现读，装机后刷新插件页即生效，无需重启。
+
 ### 0.10.14 修复：「全部更新」批量升级串行短路 + dsh-m 收尾定序（#10）
 
 - **症状（#10，0.10.8/0.10.13 两代实机实证）**：已装列表有两项及以上待更新时点「全部更新」，一项成功、另一项报「命令失败 (exit 1)：ERR_PNPM_… / profile 可能需要人工修复」；失败项单独重试即愈。
@@ -758,6 +764,12 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Display name in 0.10.15 — official Plugins page title "dsh-m" → "Plugin Marketplace (dsh-m)"
+
+- **Background**: the official DSH Plugins page resolves each card title as "exported locale `meta.title` → package.json → package name". `dshmarket` shows "插件市场" through `locale/zh.json`, while dsh-m shipped no locale files, so its title fell back to the bare package name `dsh-m` — asymmetric with its (Chinese) description.
+- **Fix**: ① add `locale/zh.json` + `locale/en.json` (`meta.title` = "插件市场（dsh-m）" / "Plugin Marketplace (dsh-m)"; the Chinese description matches package.json's verbatim, the English one is a fresh translation); ② expose `./locale/*.json` in package.json exports and ship `locale` in the publish surface (`en.json` is the host's discovery anchor for the locale directory — without it the whole directory is skipped); ③ the assert-pack gate now lists both locale files as required release artifacts; ④ new `tests/plugin-meta-locale.test.mjs` guard (exports key, bilingual meta validity, Chinese title regression anchor, gate self-consistency).
+- **Deployment**: the host's `readPluginMeta` reads fresh on every inventory build — after the upgrade, refresh the Plugins page; no restart needed.
 
 ### Fix in 0.10.14 — "Update all" batch upgrade: serial with fail-short-circuit, dsh-m self-upgrade ordered last (#10)
 
