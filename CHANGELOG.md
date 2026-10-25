@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.14 修复：「全部更新」批量升级串行短路 + dsh-m 收尾定序（#10）
+
+- **症状（#10，0.10.8/0.10.13 两代实机实证）**：已装列表有两项及以上待更新时点「全部更新」，一项成功、另一项报「命令失败 (exit 1)：ERR_PNPM_… / profile 可能需要人工修复」；失败项单独重试即愈。
+- **根因**：批量入口 void 丢 Promise 一次性全发（不 await、失败不短路）。后端 Profile 变更事务 FIFO 虽保证串行，但批量里 dsh-m 自升级 committed 后宿主换装/重载市场插件本体，同批后续项在刚变过的 profile 上做事务与 frozen 复验必炸。
+- **修法**：①批量逐项 await + 失败短路——失败项的「哪一项 + 错误原文」由逐项 toast 与操作记录保留（串行后不再互相淹没），不在 manual-repair 半残 profile 上继续；superseded 良性跳过不中断批量。②定序单源 `batchUpgradeOrder`（pure/Node 可测）：dsh-m 固定收尾——自换装永无同批后续项；按钮旁新增双语提示「dsh-m 自身将最后升级：自换装不中断其他项」。③`doUpgrade` 返回逐项成败：单点「升级」不看返回值、行为零变化；transport 语义零客户端特判（0.10.0 R6 不变）。
+- **验证**：`batchUpgradeOrder` 纯逻辑 5 例 + installed-tab 批量接线结构锚 5 例；全量 npm test 1733/1733 零失败。
+
 ### 0.10.13 文案更新：自研插件兼容清单同步 DSH 0.2.1-rc.3
 
 - **市场清单**：标记 dsh-skins Web 与 Desktop 均已实测 0.2.1-rc.3；补入 skip-browser-auth 与 copilot-auth 的 Web rc.3 实测；四个 decoupled 自研条目不再列 DSH 版本号，保留插件自身前置条件。
@@ -751,6 +758,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### Fix in 0.10.14 — "Update all" batch upgrade: serial with fail-short-circuit, dsh-m self-upgrade ordered last (#10)
+
+- **Symptom (#10, reproduced on 0.10.8 and 0.10.13)**: clicking "Update all" with two or more outdated plugins upgraded one successfully while the other failed with "命令失败 (exit 1): ERR_PNPM_… / profile may need manual repair"; retrying the failed item alone succeeded.
+- **Root cause**: the batch entry fired every upgrade as a floating promise (no await, no short-circuit). The backend Profile-change transaction FIFO does serialize execution, but once dsh-m's self-upgrade committed, the host swapped and reloaded the market plugin itself — and the next item of the same batch ran its transaction and frozen re-verification against a just-changed profile, which fails by construction.
+- **Fix**: ① the batch now awaits each item and stops at the first failure — the failing item's "which target + raw error" stays in its own toast and operation record (no longer drowned by siblings), and later items never run on a manual-repair half-repaired profile; superseded (benign skip) does not interrupt the batch. ② a single ordering source `batchUpgradeOrder` (pure, Node-testable) pins dsh-m last, so a self-swap never has same-batch followers; a bilingual hint ("dsh-m itself upgrades last: its self-swap won't interrupt the other items") appears next to the button. ③ `doUpgrade` returns per-item success: the single-item Upgrade button ignores it (zero behavior change) and transport semantics keep zero client special-casing (0.10.0 R6 unchanged).
+- **Verification**: 5 pure-logic cases for `batchUpgradeOrder` + 5 structural anchors for the installed-tab batch wiring; full `npm test` 1,733/1,733 green.
 
 ### Copy update in 0.10.13 — self-built plugin compatibility metadata for DSH 0.2.1-rc.3
 
