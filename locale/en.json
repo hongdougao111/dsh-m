@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Plugin Marketplace (dsh-m)",
+    "description": "Customizable curated-list marketplace for DSH plugins: collect, install, uninstall, and upgrade in one place, with agent tools and the dshm CLI."
+  }
+}

@@ -20,6 +20,9 @@ export const REQUIRED = [
   'README.en.md',
   'cordis.patch.yml',
   'package.json',
+  // 0.10.15：exported locale 显示名元数据（官方插件页标题「插件市场（dsh-m）」的载具）
+  'locale/en.json',
+  'locale/zh.json',
 ]
 
 // 0.10.4：DESIGN.md 与 CHANGELOG.md 移出发布面（仓库 docs/ 与根目录留存）——精确名单防回潜
