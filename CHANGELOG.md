@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.16 修复：批量升级 post-write 伪失败账实改判普适化——报 already-installed 但目标版已写穿时改判成功（skip-browser-auth 0.4.3 真机事件）
+
+- **症状（2026-10-25 真机实录）**：Desktop「全部更新」升级 @iasiv5/dsh-skip-browser-auth 0.4.2→0.4.3 报失败（升级失败原因：already-installed、自动回装未完成），但账面与 node_modules 实体已是 0.4.3，重启 Desktop 即激活——0.10.2 只对 D3 自升级通道做了账实改判，普通批量升级路径仍报失败。
+- **根因**：宿主 0.2.1 already-installed 守卫的自指伪影不挑通道——installBundle 写穿三面账（manifest/node_modules/lock 均为目标版）后，完成路径自触守卫回传 failed；此刻兜底回装腿「remove 后旧名已不在 manifest，守卫不适用」的假设不成立（manifest 已含新名），回装必再撞守卫 → rollback-failed 误报。
+- **修法（src/core/profile-ops.ts runManagedInstall）**：两处失败闸（两步第二腿 / 首腿）终态失败时先账实复读（镜像 D3 0.10.2 先例）——判据为**三面账一致**（listInstalled 的 version 与 spec 都等于 npm 源精确目标版）= 升级事实成立，按成功改判（needsRestart=true，重启 Desktop 激活），绝不降级倒退；只看 version 会误吞 release-age 账实分裂形态（node_modules 已写新、manifest 被回滚到旧 pin——那是等待/回退风险）；复读失败或账面不符 → 既有回装/失败语义不变（降级恢复、缺席硬错误族原样）。
+- **验证**：profile-ops 套件 **78/78 全绿**——新增三钉 T10（第二腿伪失败 + 三面账一致 → 改判成功：零回装腿、目标版落账、needsRestart、output 含改判说明）、T11（第二腿真失败且账面仍旧版 → 改判不误触发、degraded 语义不变）、T12（首腿真失败零回装零卸载）；GitHub 源（version 缺席）不进改判分支。0.9.19「账实分裂复读」钉例随判据收敛转绿（node_modules 新 / manifest 旧 pin 的等待与回退风险语义不被误改判）。Windows 本机全量 1717 项 1689 过 17 败——17 败与本机既有基线（know-how 028 §4 清单族）逐名一致，零新增失败。
+
 ### 0.10.15 显示名：官方插件页标题「dsh-m」→「插件市场（dsh-m）」
 
 - **背景**：DSH 官方插件页的插件卡标题按「exported locale 的 `meta.title` → package.json → 包名」取值；`dshmarket` 借 `locale/zh.json` 显示「插件市场」，而 dsh-m 无 locale 文件，标题回退成裸包名 `dsh-m`，与描述文案（中文）不对称。
@@ -764,6 +771,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### 0.10.16 Fix: generalize the post-write false-failure ledger reconciliation to all upgrade paths — reconcile to success when the target version is already written (skip-browser-auth 0.4.3 live incident)
+
+- **Symptom (2026-10-25, live)**: a Desktop batch upgrade of @iasiv5/dsh-skip-browser-auth 0.4.2→0.4.3 reported failure (reason: already-installed, auto-reinstall incomplete) while the ledger and node_modules already held 0.4.3; restarting Desktop finished activation. 0.10.2 added ledger reconciliation only for the D3 self-upgrade channel; the regular batch path still reported failure.
+- **Root cause**: the host 0.2.1 already-installed guard's self-referential artifact is channel-agnostic — installBundle writes all three ledgers (manifest/node_modules/lock) to the target version, then its own completion path re-trips the guard and returns failed; at that point the fallback-reinstall leg's assumption ("after remove the name is gone from the manifest") no longer holds, so the rollback re-trips the guard and misreports rollback-failed.
+- **Fix (src/core/profile-ops.ts runManagedInstall)**: both failure gates (two-step second leg / first leg) now reconcile the ledger before declaring failure (mirrors D3 0.10.2): if the exact npm-source target version is already written, the upgrade factually holds — reconcile to success (needsRestart=true, restart Desktop to activate), never downgrade; if the ledger read fails or still shows the old version, the existing rollback/failure semantics are unchanged (degraded recovery and the absent-package hard-error family are intact).
+- **Verification**: the profile-ops suite is now **78/78 green** — three new pins: T10 (second-leg artifact with all three ledgers at target → reconciled to success: zero rollback legs, target version recorded, needsRestart, output annotated), T11 (genuine second-leg failure with the old version still on the ledger → no reconciliation, degraded semantics intact), T12 (first-leg genuine failure: zero rollback, zero remove); GitHub-source specs (no version) skip the reconciliation branch. The 0.9.19 "ledger split re-read" pin turns green with the tightened condition (node_modules-new/manifest-old-pin keeps its wait-and-rollback-risk semantics — never mis-reconciled). Windows full suite: 1717 tests, 1690 pass, 17 fail — the 17 match this machine's pre-existing baseline (know-how 028 §4 families) name by name, zero new failures.
 
 ### Display name in 0.10.15 — official Plugins page title "dsh-m" → "Plugin Marketplace (dsh-m)"
 

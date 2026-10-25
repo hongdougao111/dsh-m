@@ -569,6 +569,56 @@ describe('desktopUpgradeFromRegistry：already-installed 两步化 + 兜底回�
     )
     assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'])
   })
+
+  // ---------- 0.10.16：post-write 伪失败账实改判（0.4.3 批量升级真机事件，D3 0.10.2 先例镜像） ----------
+
+  it('T10：第二腿 post-write 伪失败（already-installed 但账面已写穿目标版）→ 改判成功，零回装零降级', async () => {
+    // 账本是演化的：升级前 1.0.0 → 第二腿写穿三面账后为 1.2.3（随后完成路径自触守卫）
+    let ledgerVersion = '1.0.0'
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      ledgerVersion = '1.2.3'
+      return { ...GUARD_FAIL }
+    } })
+    const deps = twoStepDeps(service, { installed: [{ pkg: 'pkg-a', name: 'Plug A', version: '1.0.0', spec: '1.0.0' }] })
+    deps.listInstalled = async () => ({ items: [{ pkg: 'pkg-a', name: 'Plug A', version: ledgerVersion, spec: ledgerVersion }] })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, { profileDir: 'X:/profile-demo' }, deps)
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3'], '改判成功：零回装腿')
+    assert.deepEqual(calls.removeBundle, ['pkg-a'])
+    assert.equal(res.version, '1.2.3', '账实相符：目标版落账')
+    assert.equal(res.needsRestart, true)
+    assert.equal(res.degraded, undefined)
+    assert.match(res.output, /改判成功/)
+    assert.match(res.output, /post-write 伪失败/)
+  })
+
+  it('T11：第二腿失败且账面仍为旧版（真失败，非伪失败）→ 改判不误触发，既有回装语义不变', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      if (calls.installBundle.length === 1) return { ...GUARD_FAIL }
+      if (calls.installBundle.length === 2) return { ...ADD_FAIL }
+      return { ...OK }
+    } })
+    const res = await desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service))
+    assert.equal(res.degraded, true)
+    assert.equal(res.restoredTo, '0.9.0')
+    assert.deepEqual(calls.installBundle.map((c) => c.spec), ['pkg-a@1.2.3', 'pkg-a@1.2.3', 'pkg-a@0.9.0'])
+    assert.doesNotMatch(res.output, /改判成功/)
+  })
+
+  it('T12：第一腿真失败（pnpm 未写入，旧版本就还在）→ 既有语义：报失败零回装，改判不误触发', async () => {
+    const { service, calls } = managerStub({ installBundle: async (spec, options) => {
+      calls.installBundle.push({ spec, options })
+      return calls.installBundle.length === 1 ? { ...ADD_FAIL } : { ...OK }
+    } })
+    await assert.rejects(
+      () => desktopUpgradeFromRegistry('pkg-a', {}, {}, twoStepDeps(service)),
+      (err) => err instanceof DesktopOpsError,
+    )
+    assert.equal(calls.installBundle.length, 1, '首腿真失败零回装（旧版未被 remove，无需回装）')
+    assert.deepEqual(calls.removeBundle, [], '零卸载')
+  })
 })
 
 // ---------- 0.10.0 Task 5：install 路径静默两步化（R5）+ 全新安装单步回归（R1×R5 张力的 T6 消解钉） ----------

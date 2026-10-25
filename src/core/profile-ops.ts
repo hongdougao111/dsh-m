@@ -604,6 +604,38 @@ async function runManagedInstall(
   // 字面仍视其在装（守卫命中），而探测口径为「未安装」；守卫命中即 remove+add（官方语义），
   // 无旧版可回装时失败走账实复读给恢复指引。
   let twoStepNote: string | undefined
+  // 0.10.16（@iasiv5/dsh-skip-browser-auth@0.4.3 批量升级真机事件）：第二腿 already-installed
+  // 终态失败存在 post-write 伪失败形态——installBundle 已写穿三面账（manifest/node_modules/lock
+  // 均为目标版）却回传 failed/already-installed（自指操作伪影：写完后 manifest 含该名，宿主完成
+  // 路径自触守卫；D3 0.10.2 同款先例）。此刻兜底回装腿的「remove 后旧名已不在 manifest，守卫不
+  // 适用」假设不成立（manifest 已含新名），回装必再撞守卫 → rollback-failed 误报（账面明明已是
+  // 目标版）。处置（镜像 D3 0.10.2 账实改判）：两处失败闸（两步第二腿 / 首腿）终态失败时先账实
+  // 复读——npm 源目标版（ctx.version）已写入 = 升级事实成立，按成功改判（调用方 needsRestart 恒
+  // true，重启 Desktop 激活），绝不降级倒退、也绝不报失败；复读失败 / 版本不符（含仍为旧版）
+  // → 既有回装/失败语义不变。
+  const reconcilePostWriteArtifact = async (): Promise<{
+    change: DesktopChangeResult
+    bundleName: string
+    twoStepNote: string
+  } | undefined> => {
+    if (ctx.version === undefined || !ctx.profileDir || !ctx.listInstalled) return undefined
+    try {
+      const row = (await ctx.listInstalled(ctx.profileDir)).items.find((it) => it.pkg === ctx.pkg)
+      // 三面账一致才算 post-write 伪失败：version（node_modules 实装）与 spec（manifest
+      // pin）都等于目标版。只看 version 会误吞 release-age 账实分裂形态（node_modules
+      // 已写新、manifest 被官方回滚到旧 pin）——那是等待/回退风险，不是升级成立
+      // （0.9.19 钉例「账实分裂复读」守此边界，2026-10-25 真机回归教训）。
+      if (row?.version !== ctx.version || row?.spec !== ctx.version) return undefined
+      return {
+        change,
+        bundleName: ctx.pkg,
+        twoStepNote: `${twoStepNote ?? 'already-installed'}；post-write 伪失败经账实复读改判成功（目标版 ${ctx.version} 已写入三面账，重启 Desktop 激活）`,
+      }
+    } catch {
+      // 复读失败按未知处理：走既有回装/失败语义
+      return undefined
+    }
+  }
   if (isAlreadyInstalledGuard(change) && typeof service.removeBundle === 'function') {
     twoStepNote = 'already-installed → two-step'
     const removeChange = changeOf(await service.removeBundle(ctx.pkg))
@@ -616,6 +648,8 @@ async function runManagedInstall(
     }
     change = await installOnceRetryingEnable(ctx.spec)
     if (isTerminalFailure(change)) {
+      const reconciled = await reconcilePostWriteArtifact()
+      if (reconciled !== undefined) return reconciled
       const pendingAdd = pendingOf(change)
       const addDiagnostic = `${change.error?.diagnostic ?? ''}${change.error?.code ? `\n${change.error.code}` : ''}`.trim()
       const addCancelled = change.application === 'cancelled'
@@ -703,6 +737,8 @@ async function runManagedInstall(
   }
 
   if (change.application === 'failed' || change.application === 'cancelled' || change.error) {
+    const reconciled = await reconcilePostWriteArtifact()
+    if (reconciled !== undefined) return reconciled
     try {
       await mapFailure(change)
     } catch (err) {
