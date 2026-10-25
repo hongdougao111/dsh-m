@@ -9,7 +9,7 @@ import { api } from "./hooks.js";
 import { lookup } from "./i18n.js";
 import { installedViewModel } from "./installed-view.js";
 import { toggleViewModel, toggleNoticeKeys } from "./toggle-view.js";
-import { applyInstalledUpdates } from "./installed-updates.js";
+import { applyInstalledUpdates, batchUpgradeOrder } from "./installed-updates.js";
 import { opUpgradeMeta } from "./operations-view.js";
 import { restartBannerDecision } from "./panel-ops.js";
 import { Icon, Spin, PhaseDot, ToggleSwitch, TwoStepButton, LinksRow, ProgressLine, ReadmeBlock } from "./chrome.jsx";
@@ -89,6 +89,8 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
     }
   };
 
+  // issue #10 修复②：返回逐项成败（true=成功含降级恢复/良性跳过；false=失败）——批量循环据此短路。
+  // 单点升级按钮不看返回值，行为零变化；transport 语义零特判（R6 不变，见 installed-view 锚测试）。
   const doUpgrade = async (it) => {
     try {
       // 0.9.75：升级结果版本变迁（from/to，github 源回退 sha 前 7 位）经 opMeta 落账进操作记录
@@ -109,10 +111,12 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
         notify({ kind: "ok", needsRestart: restartBannerDecision("upgrade", res).needsRestart, text: ok.text });
       }
       await (onMutation ? onMutation() : reload());
+      return true;
     } catch (e) {
       // 0.9.94 变更结局描述（op-outcome）：guard/superseded/plain 合一（今日 guard 在前，互斥分支语义等价）
       const m = oc.mutationFailed(e, { verb: "upgrade", target: it.pkg });
       notify({ kind: m.kind, text: m.text });
+      return m.kind !== "err"; // superseded（前提消失良性跳过）不中断批量；真实失败返回 false
     }
   };
 
@@ -120,6 +124,8 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
   if (error) return h("div", { className: "dshm-err" }, lookup("failed.read", { err: error }));
   // 两段加载（ADR-0008）：items 指向 merged 视图；updates 未到时即第一段原样（卡片暂无更新提示，常态安静）
   const items = applyInstalledUpdates((data && data.items) || [], updateRows);
+  // issue #10 修复③：批量目标定序单源（dsh-m 收尾）——按钮计数/可见性/批量循环共用一份
+  const batch = batchUpgradeOrder(items);
   if (!items.length) return h("div", { className: "dshm-empty" }, `${lookup("installed.empty")} (${data.profileDir})`);
 
   return h(
@@ -129,7 +135,7 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
     data.others > 0
       ? h("div", { className: "dshm-others" }, lookup("installed.others", { n: data.others }))
       : null,
-    items.some((x) => x && x.outdated)
+    batch.targets.length > 0
       ? h(
           "div",
           { className: "dsvm-sortrow" },
@@ -138,13 +144,23 @@ function InstalledTab({ notify, installed, updates, onMutation, ops }) {
             {
               className: "dshm-btn primary sm",
               disabled: activeMutateTarget != null,
-              onClick: () => {
-                // 全部入队（0.7.0 Task 15）：逐条 runOp 记录，后端 Profile 变更事务 FIFO 保证串行
-                for (const it of items.filter((x) => x && x.outdated)) void doUpgrade(it);
+              onClick: async () => {
+                // issue #10 修复①②：逐项 await 串行 + 失败短路（旧实现一次性 void 丢 Promise 全发——
+                // 后端事务 FIFO 虽串行，但市场插件自换装（宿主重载本体）夹在普通项之间时，后续项
+                // 的事务/frozen 复验在刚变过的 profile 上必炸，0.10.8/0.10.13 实机实证「一项成功一项
+                // exit 1、单项重试即愈」；失败短路同时避免在 manual-repair 半残 profile 上继续后续项。
+                // 定序：batchUpgradeOrder——dsh-m 收尾，自换装永无后续项。
+                // 失败项的「哪一项 + 错误原文」由 doUpgrade 既有 per-item 通知保留（串行后不再互相淹没）。
+                for (const it of batch.targets) {
+                  if (!(await doUpgrade(it))) break;
+                }
               },
             },
-            lookup("installed.upgradeAll", { n: items.filter((x) => x && x.outdated).length }),
+            lookup("installed.upgradeAll", { n: batch.targets.length }),
           ),
+          batch.selfIncluded
+            ? h("span", { className: "dshm-hint", key: "self-last" }, lookup("installed.upgradeAll.selfLast"))
+            : null,
         )
       : null,
     progressTarget ? h(ProgressLine, { key: "prog" }) : null,

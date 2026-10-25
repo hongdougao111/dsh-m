@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { applyInstalledUpdates, installedUpdateStats } from '../src/client/installed-updates.js'
+import { applyInstalledUpdates, installedUpdateStats, batchUpgradeOrder, BATCH_SELF_PKG } from '../src/client/installed-updates.js'
 
 const base = { pkg: 'a', name: 'A', version: '1.0.0' }
 const upd = (over = {}) => ({
@@ -61,6 +61,42 @@ describe('installedUpdateStats', () => {
     ]
     assert.deepEqual(installedUpdateStats(items), { outdatedCount: 2, incompleteCount: 2 })
     assert.deepEqual(installedUpdateStats(null), { outdatedCount: 0, incompleteCount: 0 })
+  })
+})
+
+// ---------- issue #10 修复③：「全部更新」批量定序——dsh-m 自升级收尾（pure） ----------
+describe('batchUpgradeOrder（issue #10：dsh-m 收尾定序；自换装永无同批后续项）', () => {
+  it('① dsh-m 固定收尾，普通项保持列表序在前；targets 元素是原 item 引用', () => {
+    const self = { pkg: 'dsh-m', outdated: true }
+    const b = { pkg: 'b', outdated: true }
+    const c = { pkg: 'c', outdated: true }
+    const items = [self, { pkg: 'a', outdated: false }, b, c]
+    const { targets, selfIncluded } = batchUpgradeOrder(items)
+    assert.deepEqual(targets.map((t) => t.pkg), ['b', 'c', 'dsh-m'], '普通项列表序在前 + 自升级收尾')
+    assert.equal(selfIncluded, true)
+    assert.equal(targets[2], self, '引用原 item 对象（latestVersion 等视图字段随原对象）')
+  })
+
+  it('② 无 dsh-m：targets 全部按列表序，selfIncluded=false（提示不渲染）', () => {
+    const items = [{ pkg: 'x', outdated: true }, { pkg: 'y', outdated: true }]
+    assert.deepEqual(batchUpgradeOrder(items), { targets: items, selfIncluded: false })
+  })
+
+  it('③ 只有 dsh-m outdated：targets 仅含自身，selfIncluded=true（批量退化为单点收尾升级）', () => {
+    const self = { pkg: 'dsh-m', outdated: true }
+    const { targets, selfIncluded } = batchUpgradeOrder([self, { pkg: 'z', outdated: false }])
+    assert.deepEqual(targets, [self])
+    assert.equal(selfIncluded, true)
+  })
+
+  it('④ 非数组/垃圾项/非 outdated 安全降级', () => {
+    assert.deepEqual(batchUpgradeOrder(null), { targets: [], selfIncluded: false })
+    assert.deepEqual(batchUpgradeOrder('nope'), { targets: [], selfIncluded: false })
+    assert.deepEqual(batchUpgradeOrder([null, 'x', { pkg: 'a', outdated: false }, { outdated: true }]), { targets: [], selfIncluded: false })
+  })
+
+  it('⑤ BATCH_SELF_PKG 单点常量 = dsh-m（与 core profile-ops SELF_PKG 同值；客户端字面唯一处）', () => {
+    assert.equal(BATCH_SELF_PKG, 'dsh-m')
   })
 })
 

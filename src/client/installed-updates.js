@@ -50,3 +50,28 @@ export function installedUpdateStats(items) {
   }
   return { outdatedCount, incompleteCount }
 }
+
+/** issue #10 批量升级排序的自换装包名（单点；与 core SELF_PKG 同值，客户端只有此一处字面）。 */
+export const BATCH_SELF_PKG = 'dsh-m'
+
+/**
+ * 「全部更新」批量目标排序（issue #10 修复①③，pure）：outdated 项中 dsh-m 自身固定收尾，
+ * 其余项保持列表序在前。依据：自升级事务 committed 后宿主换装/重载市场插件本体，同批
+ * 后续项在刚变过的 profile 上做事务与 frozen 复验必炸（0.10.8/0.10.13 实机实证——一项成功
+ * 一项 exit 1，单项重试即愈）；排最后 = 自换装永无后续项。批量循环自身负责逐项 await +
+ * 失败短路（installed-tab onClick）；本函数只定序，不做任何 IO/React。
+ * 返回 { targets, selfIncluded }：targets 为已排序的升级队列（引用原 item 对象），
+ * selfIncluded 供按钮旁提示。非数组/垃圾项安全降级为空队列。
+ */
+export function batchUpgradeOrder(items) {
+  const arr = Array.isArray(items) ? items : []
+  const normal = []
+  const self = []
+  for (const it of arr) {
+    if (!it || typeof it !== 'object' || it.outdated !== true) continue
+    if (typeof it.pkg !== 'string' || it.pkg === '') continue
+    if (it.pkg === BATCH_SELF_PKG) self.push(it)
+    else normal.push(it)
+  }
+  return { targets: [...normal, ...self], selfIncluded: self.length > 0 }
+}

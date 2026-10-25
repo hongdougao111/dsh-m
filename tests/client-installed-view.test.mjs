@@ -119,3 +119,38 @@ describe('已装列表升级入口零特判（0.10.0 Task 11 ④）', () => {
     assert.ok(!body.includes('dsh-m'), '零 dsh-m 字面特判（D3 语义由服务端 core 缝自动覆盖）')
   })
 })
+
+// ---------- issue #10：「全部更新」批量串行 + 失败短路 + dsh-m 收尾（定序在 installed-updates.batchUpgradeOrder） ----------
+// 行为纯逻辑测在 client-installed-updates.test.mjs；本块只锚 installed-tab.jsx 的接线结构。
+describe('全部更新批量接线（issue #10）', () => {
+  const itSrc = readFileSync(new URL('../src/client/installed-tab.jsx', import.meta.url), 'utf8')
+
+  it('① 旧的一次性全发（void 丢 Promise）绝迹', () => {
+    assert.equal(itSrc.split('void doUpgrade(').length - 1, 0, '批量旧实现已删；逐项 await 是唯一发起方式')
+  })
+
+  it('② 批量循环逐项 await + 失败短路（单处）', () => {
+    assert.equal(itSrc.split('for (const it of batch.targets) {').length - 1, 1, '串行循环唯一')
+    assert.equal(itSrc.split('if (!(await doUpgrade(it))) break;').length - 1, 1, '失败即停，不在半残 profile 上继续')
+  })
+
+  it('③ 批量定序单源 batchUpgradeOrder（计数/可见性/循环共用一份）', () => {
+    assert.equal(itSrc.split('batchUpgradeOrder(items)').length - 1, 1, '定序调用唯一')
+    assert.ok(itSrc.includes('lookup("installed.upgradeAll", { n: batch.targets.length })'), '计数用排序后 targets（dsh-m 含入，收尾）')
+    assert.ok(itSrc.includes('batch.selfIncluded'), '自升级收尾提示接线在')
+  })
+
+  it('④ doUpgrade 逐项成败契约：成功 return true；失败按结局分类（superseded 良性跳过不中断批量）', () => {
+    const start = itSrc.indexOf('const doUpgrade = async (it) => {')
+    const end = itSrc.indexOf('if (loading && !data) return', start)
+    assert.ok(end > start, 'doUpgrade 切片边界在')
+    const body = itSrc.slice(start, end)
+    assert.ok(body.includes('return true;'), '成功臂返回 true')
+    assert.ok(body.includes('return m.kind !== "err";'), '失败臂按结局分类返回')
+  })
+
+  it('⑤ 收尾提示文案双字典在位（i18n.js zh/en 各一枚）', () => {
+    const i18nSrc = readFileSync(new URL('../src/client/i18n.js', import.meta.url), 'utf8')
+    assert.equal(i18nSrc.split('"installed.upgradeAll.selfLast"').length - 1, 2, 'zh/en 各一枚')
+  })
+})
