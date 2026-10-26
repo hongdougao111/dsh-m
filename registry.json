@@ -269,6 +269,17 @@
       "npm": "dsh-archive-trash",
       "github": "hongdougao111/dsh-archive-trash",
       "homepage": "https://github.com/hongdougao111/dsh-archive-trash"
+    },
+    {
+      "id": "dsh-power-switch",
+      "name": "DSH Power Switch",
+      "description": "电源开关：会话头部一键重启或关闭 DSH 进程，重启按原命令行拉起新进程。已适配 0.2.1-rc.3，详见仓库。",
+      "category": "essentials",
+      "tags": ["重启", "关闭", "进程", "电源"],
+      "verified": ["0.2.1-rc.3"],
+      "source": "github",
+      "github": "hongdougao111/dsh-power-switch",
+      "homepage": "https://github.com/hongdougao111/dsh-power-switch"
     }
   ]
 }
