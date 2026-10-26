@@ -442,3 +442,42 @@ export function autoExpandDecision(activeTop, clipTop, autoRefMatched, expanded)
   if (!beyond || autoRefMatched) return { record: false, expand: false }
   return { record: true, expand: !expanded }
 }
+
+// ---------- 翻页回顶（pager scroll-to-top，2026-10-25 方案 C）：筛选身份键 + 容器直滚原语 ----------
+
+/**
+ * 筛选身份键（GLOSSARY）：分区 + 查询词 + 分类 + 排序 + 页大小；offset 显式不在键内——
+ * 键变 ⇒ 必然回第一页并触发瞬时回顶；键不变 ⇒ 页移动与任何刷新（mutation 后 reload、
+ * 后台静默换新）都视作同一份结果、滚动位置不动。query 需为 normalizeMarketQuery 产物形状
+ * （或 undefined，收藏区 market=null）；字段防御式读取，任意输入不抛。
+ * @param {string} zone 分区（'community' | 'primary' | 'favorites'）
+ * @param {{query?: string, category?: string|null, sort?: {field:string,dir:string}|null, limit?: number}|undefined} query
+ * @returns {string}
+ */
+export function filterScrollKey(zone, query) {
+  const q = query && typeof query === 'object' ? query : {}
+  return JSON.stringify([zone, typeof q.query === 'string' ? q.query : '', q.category ?? null, q.sort ?? null, q.limit ?? null])
+}
+
+/**
+ * 容器直滚原语（GLOSSARY「滚动容器/回顶」）：只作用于滚动容器本身，不依赖任何内容子元素
+ * 的位置几何（0.10.16 病灶：以 sticky 吸顶行为滚动定位锚点，stuck 态判定空转）。
+ * @param {{scrollTo?: Function, scrollTop?: number}|null|undefined} el 滚动容器（可为 null）
+ * @param {'smooth'|'instant'} behavior 滚动动效
+ */
+export function scrollBodyTop(el, behavior) {
+  if (!el) return
+  if (typeof el.scrollTo === 'function') el.scrollTo({ top: 0, behavior })
+  else el.scrollTop = 0
+}
+
+/**
+ * 页移动动效折算：系统「减少动态」偏好命中时瞬时；环境无 matchMedia（node/SSR）默认 smooth。
+ * @returns {'smooth'|'instant'}
+ */
+export function preferredPagerBehavior() {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+  }
+  return 'smooth'
+}

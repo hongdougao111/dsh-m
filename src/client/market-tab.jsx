@@ -10,10 +10,10 @@ const ZONE_TABS = [
 ];
 
 const h = React.createElement;
-const { useState, useEffect } = React;
+const { useState, useEffect, useLayoutEffect } = React;
 import { api } from "./hooks.js";
 import { lookup, browserLang, communityLabels } from "./i18n.js";
-import { DEFAULT_PAGE_SIZE, MARKET_PAGE_SIZES, pageItems, zoneChips, marketNotice } from "./market-state.js";
+import { DEFAULT_PAGE_SIZE, MARKET_PAGE_SIZES, pageItems, zoneChips, marketNotice, scrollBodyTop, preferredPagerBehavior, filterScrollKey } from "./market-state.js";
 import { backdropCloseHandlers } from "./backdrop.js";
 import { opAppliesTo } from "./operations.js";
 import { opUpgradeMeta } from "./operations-view.js";
@@ -28,7 +28,7 @@ import { createOpOutcome } from "./op-outcome.js";
 // op-outcome 模块级实例（与 main.jsx 同款装配）
 const oc = createOpOutcome(lookup);
 
-function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, onOpenOps }) {
+function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, onOpenOps, bodyRef }) {
   const [zone, setZone] = useState("community");
   const market = zone === "favorites" ? null : markets[zone];
   const { data, loading, error, reload, query, updateQuery } = market || {};
@@ -74,15 +74,18 @@ function MarketTab({ notify, markets, onMutation, ops, favorites, profileKind, o
   const pages = total > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
   const counts = (data && data.categoryCounts) || {};
   const notice = data ? marketNotice(data.registryState, data.community) : null;
-  // 翻页：offset 定位 + 回滚列表顶部（吸顶 chips 行为锚点）
+  // 页移动回顶（GLOSSARY「回顶」）：点击即滚不等响应——直滚滚动容器本身，
+  // 不以 sticky 吸顶行为锚点（stuck 态下按当前几何误判「已在视口内」而空转，0.10.16 病灶）。
   const gotoPage = (p) => {
     updateQuery({ offset: Math.max(0, (p - 1) * limit) });
-    if (typeof document !== "undefined") {
-      // 0.9.25：搜索态 chips 行隐藏 → 摘要行接管回顶锚点
-      const el = document.querySelector(searching ? ".dsvm-searchmeta" : ".dsvm-chipswrap");
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
-    }
+    scrollBodyTop(bodyRef && bodyRef.current, preferredPagerBehavior());
   };
+  // 筛选身份变化 ⇒ 回第一页 ⇒ 瞬时回顶（GLOSSARY「筛选身份键」）；offset 不在键内，
+  // 页移动不触发本层；mutation 后 reload / 后台换新键不变，滚动位置原样保留（白名单）。
+  const pagerScrollKey = filterScrollKey(zone, query);
+  useLayoutEffect(() => {
+    scrollBodyTop(bodyRef && bodyRef.current, "instant");
+  }, [pagerScrollKey]);
   // 页号跳转（0.7.3）：仅接受 1..pages 且非当前页；跳转后清空草稿
   const pageJumpNum = pageJump ? parseInt(pageJump, 10) : 0;
   const pageJumpValid = pageJumpNum >= 1 && pageJumpNum <= pages && pageJumpNum !== page;

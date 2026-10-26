@@ -22,6 +22,9 @@ const {
   pageItems,
   searchSourceOf,
   mergeLatestFields,
+  filterScrollKey,
+  scrollBodyTop,
+  preferredPagerBehavior,
 } = ms
 
 describe('旧混排导出已删除（0.7.0 Task 8）', () => {
@@ -315,5 +318,61 @@ describe('C3 接线结构锚（收藏批量 stale + fetchPage 零增量守卫）
     const hooksSrc = readFileSync(new URL('../src/client/hooks.js', import.meta.url), 'utf8')
     assert.ok(hooksSrc.includes('if (!marketResponseEquivalent(prevData, merged)) setData(merged);'), '守卫调用逐字锚')
     assert.ok(hooksSrc.includes('import { normalizeMarketQuery, createZoneState, normalizeMarketResponse, searchSourceOf, resetPageOnFilterChange, mergeLatestFields, marketResponseEquivalent } from "./market-state.js"'), 'hooks.js import 行导入 marketResponseEquivalent')
+  })
+})
+
+// ---------- 翻页回顶（pager scroll-to-top）：筛选身份键 + 容器直滚原语（2026-10-25 方案 C） ----------
+describe('filterScrollKey（筛选身份键，GLOSSARY）', () => {
+  const base = () => normalizeMarketQuery({}, 'community')
+  it('同入参恒同串（不回顶白名单回归锚：reload/后台换新键不变）', () => {
+    assert.equal(filterScrollKey('community', base()), filterScrollKey('community', base()))
+  })
+  it('仅 offset 不同 → 键相同（页移动绝不触发 Layer-2 的核心锚）', () => {
+    const a = { ...base(), offset: 0 }
+    const b = { ...base(), offset: 64 }
+    assert.equal(filterScrollKey('community', a), filterScrollKey('community', b))
+  })
+  it('query 文本变化 → 键变化', () => {
+    assert.notEqual(filterScrollKey('community', base()), filterScrollKey('community', { ...base(), query: 'skins' }))
+  })
+  it('category 变化（null ↔ slug）→ 键变化', () => {
+    assert.notEqual(filterScrollKey('community', base()), filterScrollKey('community', { ...base(), category: 'theme' }))
+  })
+  it('sort：null ↔ object / field 变 / dir 变 → 键变化', () => {
+    const s = { field: 'downloads', dir: 'desc' }
+    assert.notEqual(filterScrollKey('community', base()), filterScrollKey('community', { ...base(), sort: s }))
+    assert.notEqual(filterScrollKey('community', { ...base(), sort: s }), filterScrollKey('community', { ...base(), sort: { ...s, dir: 'asc' } }))
+    assert.notEqual(filterScrollKey('community', { ...base(), sort: s }), filterScrollKey('community', { ...base(), sort: { ...s, field: 'stars' } }))
+  })
+  it('limit 变化 → 键变化', () => {
+    assert.notEqual(filterScrollKey('community', base()), filterScrollKey('community', { ...base(), limit: 96 }))
+  })
+  it('zone 变化 → 键变化', () => {
+    assert.notEqual(filterScrollKey('community', base()), filterScrollKey('primary', normalizeMarketQuery({}, 'primary')))
+  })
+  it('favorites（query=undefined）稳定且不抛', () => {
+    assert.equal(filterScrollKey('favorites', undefined), filterScrollKey('favorites', undefined))
+  })
+})
+
+describe('scrollBodyTop / preferredPagerBehavior（回顶原语，GLOSSARY）', () => {
+  it('scrollTo 函数容器：逐次 {top:0, behavior 原样}', () => {
+    const calls = []
+    const el = { scrollTo: (opts) => calls.push(opts) }
+    scrollBodyTop(el, 'smooth')
+    scrollBodyTop(el, 'instant')
+    assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }, { top: 0, behavior: 'instant' }])
+  })
+  it('无 scrollTo 的容器：回退 scrollTop = 0', () => {
+    const el = { scrollTop: 128 }
+    scrollBodyTop(el, 'smooth')
+    assert.equal(el.scrollTop, 0)
+  })
+  it('el 为 null/undefined：no-op 不抛', () => {
+    scrollBodyTop(null, 'smooth')
+    scrollBodyTop(undefined, 'instant')
+  })
+  it('node/SSR 环境（无 matchMedia）：preferredPagerBehavior 默认 smooth', () => {
+    assert.equal(preferredPagerBehavior(), 'smooth')
   })
 })

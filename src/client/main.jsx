@@ -185,6 +185,8 @@ function MarketPanel({ onClose }) {
   // null = 无记录 → 保持 overlay flex 居中，渲染与旧版逐字节一致。
   const panelRef = useRef(null);
   const headRef = useRef(null);
+  // 滚动容器（.dshm-body）权威引用（GLOSSARY「滚动容器」）：渲染者持有、下传 MarketTab 供翻页回顶
+  const bodyRef = useRef(null);
   const draggingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const [pos, setPos] = useState(() => {
@@ -825,8 +827,8 @@ function MarketPanel({ onClose }) {
       ),
       h(
         "div",
-        { className: "dshm-body" },
-        tab === "market" ? h(MarketTab, { notify, markets, onMutation: refreshViews, ops, favorites, profileKind: profile?.kind ?? null, onOpenOps: openOps }) : null,
+        { className: "dshm-body", ref: bodyRef },
+        tab === "market" ? h(MarketTab, { notify, markets, onMutation: refreshViews, ops, favorites, profileKind: profile?.kind ?? null, onOpenOps: openOps, bodyRef }) : null,
         tab === "installed" ? h(InstalledTab, { notify, installed, updates, onMutation: refreshViews, ops }) : null,
         tab === "settings" ? h(SettingsTab, {
           notify,
