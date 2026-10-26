@@ -8,6 +8,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 
 ## 中文
 
+### 0.10.17 修复：市场分页回顶——翻页/筛选/分区变化视口回列表顶部（sticky 锚点空转根治，方案 C 三轮对抗评审闭环）
+
+- **症状（2026-10-25 实测）**：市场 tab 编号分页（页码器在列表尾部）翻页后视口滞留页尾——新页排序最靠前的条目最先不可见，阅读顺序倒置；深页位切分类/页大小/排序/清搜索回第一页时同样滞留。
+- **根因**：0.7.0 起的「翻页回顶」以 `.dsvm-chipswrap`（position:sticky 吸顶元素）为滚动定位锚点——翻页时用户必在列表下方，吸顶行 stuck 态常驻视口，浏览器按元素当前几何误判「已在视口内」而空转（至多微调一个补偿带宽）。搜索态锚点 `.dsvm-searchmeta` 非粘性故一直正常，同一函数两条路径一好一坏钉死病因。
+- **修法（方案 C，GLOSSARY 新词：回顶/页移动/筛选身份键/滚动容器）**：①滚动容器所有权显式化——shell 持 `bodyRef` 挂 `.dshm-body` 经 prop 下传 MarketTab；②Layer-1 页移动（页码/‹›/页号跳转）点击即滚 `scrollBodyTop(bodyRef.current, preferredPagerBehavior())`——容器直滚不依赖子元素几何，smooth、`prefers-reduced-motion` 命中时瞬时；③Layer-2 筛选身份键 `filterScrollKey(zone, query)`（分区+查询词+分类+排序+页大小，offset 显式不进键）变化时 `useLayoutEffect` paint 前瞬时回顶——页移动绝不误触发本层，两层互斥无双滚；④不回顶白名单：mutation 后 reload/后台静默换新键不变，滚动位置原样保留；⑤设计/计划/产出三轮独立对抗评审闭环（终轮 0 阻断/0 重要/0 建议，红灯复演 12 红/32 绿逐字实证）。
+- **验证**：新增 12 用例（筛选身份键 8 + 回顶原语 4）TDD 红→绿；全量 npm test **1752/1752** 零失败；typecheck 0；`scrollIntoView` 仓库级恰 2 处（openOps 调用 + 0.9.76 注释）；隔离副本构建级双评审查（npm test/typecheck/smoke 全绿 + 红灯复演）；真机热装机（原子替换 client.js，指纹探针 + 运行中服务活体取证）+ 主人手工回归（翻页平滑回顶）通过。
+
 ### 0.10.16 修复：批量升级 post-write 伪失败账实改判普适化——报 already-installed 但目标版已写穿时改判成功（skip-browser-auth 0.4.3 真机事件）
 
 - **症状（2026-10-25 真机实录）**：Desktop「全部更新」升级 @iasiv5/dsh-skip-browser-auth 0.4.2→0.4.3 报失败（升级失败原因：already-installed、自动回装未完成），但账面与 node_modules 实体已是 0.4.3，重启 Desktop 即激活——0.10.2 只对 D3 自升级通道做了账实改判，普通批量升级路径仍报失败。
@@ -771,6 +778,13 @@ The full release history of dsh-m, maintained bilingually: **Chinese first, Engl
 ---
 
 ## English
+
+### 0.10.17 Fix: marketplace pager scroll-to-top — the viewport returns to the top of the list on page move / filter change / zone switch (root-cures the stuck sticky-anchor no-op; plan C, three adversarial review rounds)
+
+- **Symptom (observed 2026-10-25)**: in the marketplace tab, paginating via the numbered pager (at the list bottom) left the viewport at the bottom — the top-ranked items of the new page were invisible first, inverting reading order; category / page-size / sort / search changes that reset to page 1 from a deep position kept the viewport in place too.
+- **Root cause**: the scroll-to-top shipped in 0.7.0 used `.dsvm-chipswrap` (a position:sticky header) as the scroll anchor — when paging, the user is always below the list top, so the stuck header is permanently visible and the browser misjudges it as "already in view" from its current (stuck) geometry, making the scroll a no-op (at most a one compensation-band nudge). The search-mode anchor `.dsvm-searchmeta` is non-sticky and always worked; one function, two paths, one broken — which pinned the diagnosis.
+- **Fix (plan C; new GLOSSARY terms: scroll-to-top / page move / filter identity key / scroll container)**: ① explicit scroll-container ownership — the shell owns a `bodyRef` on `.dshm-body` and passes it to MarketTab as a prop; ② layer-1 page moves (page numbers / ‹ › / jump) scroll immediately via `scrollBodyTop(bodyRef.current, preferredPagerBehavior())` — a direct container scroll that depends on no child geometry, smooth with an instant fallback under `prefers-reduced-motion`; ③ layer-2 — a change of the filter identity key `filterScrollKey(zone, query)` (zone + query + category + sort + page size; `offset` explicitly excluded) triggers an instant pre-paint `useLayoutEffect` scroll; page moves never trip this layer, so the two are mutually exclusive with no double-scroll; ④ no-scroll whitelist — mutation reloads and background refreshes keep the key unchanged, preserving the scroll position; ⑤ shipped through three independent adversarial reviews (design / plan / implementation; the last closed at 0 blockers / 0 majors / 0 minors, with a red-light re-enactment proving the 12-red/32-green TDD claim verbatim).
+- **Verification**: 12 new tests (8 filter-identity-key + 4 scroll primitives) via TDD red→green; full `npm test` **1752/1752** with zero failures; `typecheck` 0; repo-wide `scrollIntoView` exactly 2 (the openOps call + a 0.9.76 comment); build-level double review in an isolated copy (npm test / typecheck / smoke all green + the red-light re-enactment); live hot-install on the production profile (atomic client.js swap, fingerprint probe + live served-bytes evidence) with the owner's manual regression (smooth scroll-to-top on page move) passing.
 
 ### 0.10.16 Fix: generalize the post-write false-failure ledger reconciliation to all upgrade paths — reconcile to success when the target version is already written (skip-browser-auth 0.4.3 live incident)
 
